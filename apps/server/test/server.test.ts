@@ -36,7 +36,7 @@ describe('FuncTree 服务端', () => {
       headers: { 'content-type': 'application/json' },
       body: {
         name: 'functree_query_context',
-        arguments: { projectId: 'proj_demo', keyword: 'login' }
+        arguments: { projectId: 'proj_demo', keyword: 'login', limit: 100 }
       }
     });
 

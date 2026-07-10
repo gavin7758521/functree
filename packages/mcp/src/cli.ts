@@ -3,9 +3,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:4174';
 const DEFAULT_TIMEOUT_MS = 30_000;
+const QUERY_CONTEXT_MAX_LIMIT = 200;
 
 const projectStatus = ['active', 'paused', 'archived'] as const;
 const featureSetTypes = ['frontend', 'backend', 'product', 'uiux', 'requirement', 'test', 'docs', 'ops', 'other'] as const;
@@ -172,7 +173,7 @@ server.registerTool(
     inputSchema: {
       projectId: z.string().optional().describe('Optional project ID. When omitted, returns project overview context.'),
       keyword: z.string().optional().describe('Optional keyword matched against indexed feature names, stable keys, versions, and descriptions.'),
-      limit: z.number().int().min(1).max(50).optional().describe('Maximum number of features or alignments to return. Defaults to 20.')
+      limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().describe('Maximum number of features or alignments to return. Defaults to 20.')
     },
     annotations: {
       readOnlyHint: true,

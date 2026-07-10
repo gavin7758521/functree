@@ -160,7 +160,7 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 
 - `projectId`
 - `keyword`
-- `limit`
+- `limit`：1 到 200，默认 20
 
 ## 打包边界
 

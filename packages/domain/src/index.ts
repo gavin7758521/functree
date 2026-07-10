@@ -71,6 +71,7 @@ const TextSchema = z.string().trim().min(1).max(200);
 const OptionalTextSchema = z.string().trim().max(4000).optional().default('');
 const VersionSchema = z.string().trim().min(1).max(80).default('当前');
 const MetadataSchema = z.record(z.string(), z.unknown()).optional().default({});
+export const QUERY_CONTEXT_MAX_LIMIT = 200;
 
 export const CreateProjectSchema = z.object({
   id: IdSchema.optional(),
@@ -141,7 +142,7 @@ export const UpdateAlignmentSchema = CreateAlignmentSchema.partial().omit({ id: 
 export const QueryContextSchema = z.object({
   projectId: IdSchema.optional(),
   keyword: z.string().trim().max(120).optional().default(''),
-  limit: z.number().int().min(1).max(50).optional().default(20)
+  limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().default(20)
 });
 
 export type CreateProjectInput = z.input<typeof CreateProjectSchema>;

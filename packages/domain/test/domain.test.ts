@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CreateAlignmentSchema, CreateFeatureSchema, labels } from '../src/index.js';
+import { CreateAlignmentSchema, CreateFeatureSchema, QueryContextSchema, labels } from '../src/index.js';
 
 describe('领域模型', () => {
   it('支持功能版本和中文状态标签', () => {
@@ -24,5 +24,11 @@ describe('领域模型', () => {
     });
 
     expect(alignment.members).toHaveLength(2);
+  });
+
+  it('支持较大的上下文查询数量', () => {
+    const query = QueryContextSchema.parse({ limit: 100 });
+
+    expect(query.limit).toBe(100);
   });
 });
