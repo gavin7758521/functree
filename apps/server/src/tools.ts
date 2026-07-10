@@ -32,11 +32,6 @@ export const toolDefinitions = [
     description: '按 id、stableKey 或成员集合创建/更新对齐关系，避免重复创建“前端 X 对应后端 Y”一类关系。'
   },
   {
-    name: 'functree_create_alignment',
-    title: '建立对齐关系',
-    description: '兼容旧入口；语义等同 functree_upsert_alignment。建议新调用方使用 functree_upsert_alignment。'
-  },
-  {
     name: 'functree_upsert_feature_sets_batch',
     title: '批量写入功能集',
     description: '在同一项目下批量 upsert 功能集，支持 dryRun，并在失败时返回具体失败项。'
@@ -79,8 +74,7 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
       }
       return repo.upsertFeature(input.featureSetId, input);
     }
-    case 'functree_upsert_alignment':
-    case 'functree_create_alignment': {
+    case 'functree_upsert_alignment': {
       const input = CreateAlignmentSchema.parse(args);
       if (!input.projectId) {
         throw new ValidationError('projectId 必填。');

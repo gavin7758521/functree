@@ -78,9 +78,6 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
-[mcp_servers.functree.tools.functree_create_alignment]
-approval_mode = "approve"
-
 [mcp_servers.functree.tools.functree_upsert_feature_sets_batch]
 approval_mode = "approve"
 
@@ -186,10 +183,6 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 - `description`
 - `metadata`
 - `dryRun`
-
-### functree_create_alignment
-
-旧兼容入口，语义等同 `functree_upsert_alignment`。新调用方建议使用 `functree_upsert_alignment`。
 
 ### batch 工具
 

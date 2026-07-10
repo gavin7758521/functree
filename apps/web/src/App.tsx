@@ -24,6 +24,23 @@ const views: Array<{ id: View; label: string; icon: typeof Layers3 }> = [
   { id: 'mcp', label: 'MCP 工具', icon: Braces }
 ];
 
+const mcpToolGroups = [
+  {
+    name: '查询',
+    tools: ['functree_query_context']
+  },
+  {
+    name: '写入',
+    tools: ['functree_create_project', 'functree_upsert_feature_set', 'functree_upsert_feature', 'functree_upsert_alignment']
+  },
+  {
+    name: '批量',
+    tools: ['functree_upsert_feature_sets_batch', 'functree_upsert_features_batch', 'functree_upsert_alignments_batch']
+  }
+];
+
+const viewIds = new Set<View>(views.map((view) => view.id));
+
 export function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -33,7 +50,7 @@ export function App() {
   const [selectedFeatureId, setSelectedFeatureId] = useState('');
   const [selectedAlignmentId, setSelectedAlignmentId] = useState('');
   const [expandedFeatureIds, setExpandedFeatureIds] = useState<Set<string>>(() => new Set());
-  const [view, setView] = useState<View>('overview');
+  const [view, setViewState] = useState<View>(() => readViewFromUrl());
   const [keyword, setKeyword] = useState('');
   const [message, setMessage] = useState('');
 
@@ -54,6 +71,19 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    const syncView = () => setViewState(readViewFromUrl());
+    window.addEventListener('popstate', syncView);
+    return () => window.removeEventListener('popstate', syncView);
+  }, []);
+
+  function setView(nextView: View) {
+    setViewState(nextView);
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', nextView);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  }
 
   const allFeatures = useMemo(() => tree?.featureSets.flatMap((set) => flattenFeatures(set.features ?? [])) ?? [], [tree]);
   const filteredFeatures = useMemo(() => {
@@ -88,7 +118,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <strong>FuncTree</strong>
-          <span>功能知识库</span>
+          <span>{overview?.totals.projects ?? 0} 个项目</span>
         </div>
         <ProjectCreator
           onCreated={async (project) => {
@@ -103,6 +133,7 @@ export function App() {
               type="button"
               className={project.id === selectedProjectId ? 'project active' : 'project'}
               onClick={() => void refresh(project.id)}
+              aria-current={project.id === selectedProjectId ? 'page' : undefined}
             >
               <span>{project.name}</span>
               <small>{project.currentVersion}</small>
@@ -115,7 +146,7 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>{tree?.project.name ?? '项目工作台'}</h1>
-            <p>{tree?.project.description || '项目、功能集、功能和对齐关系统一管理。'}</p>
+            <p>{tree ? tree.project.description || `${tree.project.id} / ${tree.project.currentVersion}` : '暂无项目'}</p>
           </div>
           <button className="iconButton" type="button" onClick={() => void refresh()} aria-label="刷新">
             <RefreshCw size={18} />
@@ -389,9 +420,13 @@ function FeatureNode({
   return (
     <div className="featureNode">
       <div className="featureNodeRow">
-        <button className="treeToggle" type="button" onClick={() => hasChildren && onToggle(feature.id)} aria-label={expanded ? '收起' : '展开'} disabled={!hasChildren}>
-          {hasChildren ? expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} /> : <span />}
-        </button>
+        {hasChildren ? (
+          <button className="treeToggle" type="button" onClick={() => onToggle(feature.id)} aria-label={expanded ? '收起' : '展开'}>
+            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </button>
+        ) : (
+          <span className="treeSpacer" />
+        )}
         <FeatureLine feature={feature} labels={labels} selected={feature.id === selectedFeatureId} onSelect={onSelect} />
       </div>
       {expanded
@@ -510,24 +545,18 @@ function McpView() {
     <section className="content">
       <div className="sectionHeader">
         <h2>MCP 工具入口</h2>
-        <span>AI 工具通过服务端写入和查询功能知识库</span>
       </div>
       <div className="mcpGrid">
-        {[
-          'functree_create_project',
-          'functree_upsert_feature_set',
-          'functree_upsert_feature',
-          'functree_upsert_alignment',
-          'functree_create_alignment',
-          'functree_upsert_feature_sets_batch',
-          'functree_upsert_features_batch',
-          'functree_upsert_alignments_batch',
-          'functree_query_context'
-        ].map((tool) => (
-          <article key={tool}>
-            <Server size={18} />
-            <strong>{tool}</strong>
-          </article>
+        {mcpToolGroups.map((group) => (
+          <section className="mcpGroup" key={group.name}>
+            <h3>{group.name}</h3>
+            {group.tools.map((tool) => (
+              <article key={tool}>
+                <Server size={18} />
+                <strong>{tool}</strong>
+              </article>
+            ))}
+          </section>
         ))}
       </div>
       <pre>{`# 中央服务端\npnpm start\n\n# 其它服务器上的 MCP 适配器\nnpm install -g @gavin7758521/functree-mcp\nFUNCTREE_SERVER_URL=http://192.168.124.82:4174 functree-mcp\n\n# 调试 HTTP 工具\nPOST /api/mcp/call\n{\n  "name": "functree_query_context",\n  "arguments": { "projectId": "proj_your_app", "keyword": "登录", "limit": 100 }\n}`}</pre>
@@ -864,6 +893,11 @@ function targetTypeLabel(type: string): string {
   if (type === 'project') return '项目';
   if (type === 'feature_set') return '功能集';
   return '功能';
+}
+
+function readViewFromUrl(): View {
+  const value = new URLSearchParams(window.location.search).get('view');
+  return value && viewIds.has(value as View) ? (value as View) : 'overview';
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

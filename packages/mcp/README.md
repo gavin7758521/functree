@@ -51,9 +51,6 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
-[mcp_servers.functree.tools.functree_create_alignment]
-approval_mode = "approve"
-
 [mcp_servers.functree.tools.functree_upsert_feature_sets_batch]
 approval_mode = "approve"
 
@@ -72,7 +69,6 @@ approval_mode = "approve"
 - `functree_upsert_feature_set`: create or update a feature set under a project by `id` or `stableKey`.
 - `functree_upsert_feature`: create or update a feature under a feature set by `id` or `stableKey` + `version`.
 - `functree_upsert_alignment`: create or update a cross-level alignment relation by `id`, `stableKey`, or member set.
-- `functree_create_alignment`: compatibility alias for `functree_upsert_alignment`.
 - `functree_upsert_feature_sets_batch`: batch upsert feature sets with `dryRun` and per-item errors.
 - `functree_upsert_features_batch`: batch upsert features with `dryRun` and rollback on write failure.
 - `functree_upsert_alignments_batch`: batch upsert alignments with member-set de-duplication.

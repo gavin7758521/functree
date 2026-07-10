@@ -191,27 +191,6 @@ server.registerTool(
 );
 
 server.registerTool(
-  'functree_create_alignment',
-  {
-    title: 'Create or update alignment relation',
-    description:
-      'Compatibility alias for functree_upsert_alignment. New clients should call functree_upsert_alignment.',
-    inputSchema: {
-      ...alignmentItemShape,
-      projectId: z.string().describe('ID of the project that owns the alignment.'),
-      dryRun: dryRunSchema
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true
-    }
-  },
-  async (args) => textResult(await callHttpTool(config, 'functree_create_alignment', args))
-);
-
-server.registerTool(
   'functree_upsert_feature_sets_batch',
   {
     title: 'Batch upsert feature sets',
