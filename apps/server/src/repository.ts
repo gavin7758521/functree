@@ -82,93 +82,6 @@ export type AlignmentMemberRow = {
 export class FuncTreeRepository {
   constructor(private readonly db: Db) {}
 
-  seedIfEmpty(): void {
-    const count = this.db.prepare('SELECT COUNT(*) AS count FROM projects').get() as { count: number };
-    if (count.count > 0) {
-      return;
-    }
-
-    const project = this.createProject({
-      id: 'proj_demo',
-      name: '示例项目',
-      status: 'active',
-      currentVersion: '2026.07',
-      description: '用于展示项目、功能集、功能版本和跨层级对齐关系的示例。'
-    });
-    const product = this.createFeatureSet(project.id, {
-      id: 'fs_product_202607',
-      name: '产品需求',
-      version: '2026.07',
-      type: 'product',
-      status: 'normal',
-      owner: '产品'
-    });
-    const frontend = this.createFeatureSet(project.id, {
-      id: 'fs_frontend_app_21',
-      name: 'App 前端',
-      version: '2.1',
-      type: 'frontend',
-      status: 'normal',
-      owner: '前端'
-    });
-    const backend = this.createFeatureSet(project.id, {
-      id: 'fs_backend_auth_15',
-      name: '认证服务',
-      version: '1.5',
-      type: 'backend',
-      status: 'normal',
-      owner: '后端'
-    });
-    const reqLogin = this.createFeature(product.id, {
-      id: 'feat_req_login',
-      stableKey: 'login',
-      name: '用户登录',
-      version: '2026.07',
-      status: 'completed',
-      kind: 'capability',
-      description: '用户可以通过手机号和验证码完成登录。'
-    });
-    const uiLogin = this.createFeature(frontend.id, {
-      id: 'feat_app_login',
-      stableKey: 'login',
-      name: '登录页面',
-      version: '2.1',
-      status: 'in_progress',
-      kind: 'page',
-      description: 'App 端登录入口、验证码输入和错误提示。'
-    });
-    this.createFeature(frontend.id, {
-      id: 'feat_app_login_countdown',
-      parentFeatureId: uiLogin.id,
-      stableKey: 'login.sms-countdown',
-      name: '验证码倒计时',
-      version: '2.1',
-      status: 'reviewing',
-      kind: 'component'
-    });
-    const apiLogin = this.createFeature(backend.id, {
-      id: 'feat_api_login',
-      stableKey: 'login',
-      name: '登录接口',
-      version: '1.5',
-      status: 'completed',
-      kind: 'api',
-      description: '校验验证码并签发访问令牌。'
-    });
-    this.createAlignment(project.id, {
-      id: 'aln_login_flow',
-      name: '登录链路对齐',
-      relation: 'corresponds_to',
-      status: 'confirmed',
-      description: '产品需求、App 页面和后端接口表达同一条登录能力。',
-      members: [
-        { targetType: 'feature', targetId: reqLogin.id, role: 'source' },
-        { targetType: 'feature', targetId: uiLogin.id, role: 'peer' },
-        { targetType: 'feature', targetId: apiLogin.id, role: 'peer' }
-      ]
-    });
-  }
-
   listProjects(): ProjectRow[] {
     return this.db
       .prepare('SELECT * FROM projects ORDER BY updated_at DESC')
@@ -418,7 +331,7 @@ export class FuncTreeRepository {
          ORDER BY rank
          LIMIT ?`
       )
-      .all(keyword, ...projectArgs, query.limit)
+      .all(ftsPhrase(keyword), ...projectArgs, query.limit)
       .map(mapFeature);
 
     return { projects, featureSets, features, alignments };
@@ -608,6 +521,10 @@ function parseJson(value: unknown): Record<string, unknown> {
 
 function json(value: unknown): string {
   return JSON.stringify(value ?? {});
+}
+
+function ftsPhrase(value: string): string {
+  return `"${value.replace(/"/gu, '""')}"`;
 }
 
 function nowIso(): string {

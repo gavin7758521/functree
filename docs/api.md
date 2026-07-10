@@ -58,7 +58,7 @@ POST /api/mcp/call
 {
   "name": "functree_query_context",
   "arguments": {
-    "projectId": "proj_demo",
+    "projectId": "proj_your_app",
     "keyword": "登录"
   }
 }

@@ -17,7 +17,6 @@ import { callTool, toolDefinitions } from './tools.js';
 
 export function createHttpServer(db: Db): FastifyInstance {
   const repo = new FuncTreeRepository(db);
-  repo.seedIfEmpty();
 
   const app = fastify({
     logger: false,
