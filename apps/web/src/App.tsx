@@ -334,7 +334,7 @@ function McpView() {
           </article>
         ))}
       </div>
-      <pre>{`pnpm mcp\n\n# 或启动 HTTP 服务\npnpm start\n\n# 调试 HTTP 工具\nPOST /api/mcp/call\n{\n  "name": "functree_query_context",\n  "arguments": { "projectId": "proj_demo", "keyword": "登录" }\n}`}</pre>
+      <pre>{`# 中央服务端\npnpm start\n\n# 其它服务器上的 MCP 适配器\nnpm install -g @gavin7758521/functree-mcp\nFUNCTREE_SERVER_URL=http://192.168.124.82:4174 functree-mcp\n\n# 调试 HTTP 工具\nPOST /api/mcp/call\n{\n  "name": "functree_query_context",\n  "arguments": { "projectId": "proj_demo", "keyword": "登录" }\n}`}</pre>
     </section>
   );
 }

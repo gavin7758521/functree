@@ -6,8 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "functree-server": "./dist/index.js",
-    "functree-mcp": "./dist/mcp.js"
+    "functree-server": "./dist/index.js"
   },
   "files": [
     "dist"
@@ -15,7 +14,7 @@
   "scripts": {
     "dev": "node --no-warnings=ExperimentalWarning --import tsx src/index.ts --host 0.0.0.0 --port 4174",
     "start": "node --no-warnings=ExperimentalWarning dist/index.js --host 0.0.0.0 --port 4174",
-    "mcp": "node --no-warnings=ExperimentalWarning --import tsx src/mcp.ts",
+    "mcp": "pnpm --filter @gavin7758521/functree-mcp mcp",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

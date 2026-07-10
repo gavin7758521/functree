@@ -11,27 +11,27 @@ export const toolDefinitions = [
   {
     name: 'functree_create_project',
     title: '创建项目',
-    description: '创建或更新一个 FuncTree 项目。'
+    description: '创建或更新 FuncTree 顶层项目，用于表示产品、系统、仓库组或长期业务工作空间。'
   },
   {
     name: 'functree_upsert_feature_set',
     title: '写入功能集',
-    description: '在项目下创建或更新一个功能集，功能集支持版本、类型和状态。'
+    description: '在项目下创建或更新带版本的功能集，例如前端、后端、产品需求、UI/UX、测试、文档或运维视角。'
   },
   {
     name: 'functree_upsert_feature',
     title: '写入功能',
-    description: '在功能集下创建或更新功能，支持功能版本和父子功能。'
+    description: '在功能集下创建或更新功能，支持功能版本、稳定语义键、类型、状态和父子功能树。'
   },
   {
     name: 'functree_create_alignment',
     title: '建立对齐关系',
-    description: '在项目、功能集、功能之间建立跨层级对齐关系。'
+    description: '在同一项目内的项目、功能集、功能之间建立跨层级对齐关系，用于表达对应、实现、支撑、验证、依赖、覆盖、拆解或冲突。'
   },
   {
     name: 'functree_query_context',
     title: '查询上下文',
-    description: '按项目和关键词查询项目、功能集、功能、对齐关系。'
+    description: '只读查询 FuncTree 项目、功能集、功能和对齐关系。写入前不确定 ID 或已有上下文时应先调用。'
   }
 ];
 

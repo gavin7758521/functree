@@ -13,7 +13,11 @@
     "dev": "pnpm --filter @functree/server dev",
     "dev:web": "pnpm --filter @functree/web dev",
     "start": "pnpm --filter @functree/server start",
-    "mcp": "pnpm --filter @functree/server mcp"
+    "mcp": "pnpm --filter @gavin7758521/functree-mcp mcp",
+    "mcp:version": "node scripts/bump-mcp-version.mjs",
+    "mcp:version:check": "pnpm --filter @gavin7758521/functree-mcp check:version",
+    "mcp:pack:dry-run": "pnpm --filter @gavin7758521/functree-mcp pack:dry-run",
+    "mcp:publish:dry-run": "pnpm --filter @gavin7758521/functree-mcp publish:dry-run"
   },
   "keywords": [
     "功能知识库",

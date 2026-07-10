@@ -117,7 +117,7 @@ FuncTree 第一版使用：
 - Node.js + TypeScript
 - SQLite 作为默认数据库
 - Fastify 提供 HTTP API
-- MCP SDK 提供 stdio MCP 服务
+- 独立 npm 包 `@gavin7758521/functree-mcp` 提供 stdio MCP 远程适配器
 - React + Vite 提供中文 Web 管理台
 
 SQLite 是默认存储介质，因为它部署简单、事务可靠、适合本地和小团队使用，并且支持 FTS5 全文搜索。未来可以增加 Postgres 适配器。

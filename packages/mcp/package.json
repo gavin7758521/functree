@@ -1,0 +1,51 @@
+{
+  "name": "@gavin7758521/functree-mcp",
+  "version": "0.1.0",
+  "description": "FuncTree remote MCP adapter for Codex and other MCP clients.",
+  "type": "module",
+  "bin": {
+    "functree-mcp": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check:version": "node ../../scripts/check-mcp-version.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node -e \"console.log('FuncTree MCP package build is covered by typecheck')\"",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "mcp": "node --no-warnings=ExperimentalWarning --import tsx src/cli.ts",
+    "pack:dry-run": "pnpm build && pnpm check:version && npm pack --dry-run --json",
+    "publish:dry-run": "pnpm build && pnpm check:version && npm publish --dry-run --json",
+    "prepublishOnly": "pnpm check:version && pnpm build"
+  },
+  "keywords": [
+    "functree",
+    "mcp",
+    "model-context-protocol",
+    "codex",
+    "feature-knowledge-base"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

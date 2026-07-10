@@ -21,11 +21,13 @@ pnpm build
 pnpm start
 ```
 
-默认服务地址：
+默认监听地址：
 
 ```text
 http://0.0.0.0:4174
 ```
+
+本机访问用 `http://127.0.0.1:4174`，局域网其它服务器访问应使用这台机器的实际 IP，例如 `http://192.168.124.82:4174`。
 
 本地开发：
 
@@ -34,7 +36,7 @@ pnpm dev
 pnpm dev:web
 ```
 
-MCP stdio 服务：
+MCP 远程适配器：
 
 ```bash
 pnpm mcp
@@ -44,21 +46,30 @@ MCP 只是 Codex 等 AI 工具访问 FuncTree 的适配层，业务数据仍由 
 
 ```bash
 pnpm start
-FUNCTREE_SERVER_URL=http://127.0.0.1:4174 pnpm mcp
+FUNCTREE_SERVER_URL=http://192.168.124.82:4174 pnpm mcp
 ```
 
-Codex 接入可以使用：
+其它服务器可以通过 npm 包安装远程 MCP 适配器：
 
 ```bash
-scripts/functree-mcp.sh
+npm install -g @gavin7758521/functree-mcp
+```
+
+Codex 接入示例：
+
+```toml
+[mcp_servers.functree]
+command = "functree-mcp"
+env = { FUNCTREE_SERVER_URL = "http://192.168.124.82:4174" }
 ```
 
 ## 项目结构
 
 ```text
-apps/server      服务端、SQLite、HTTP API、MCP
+apps/server      服务端、SQLite、HTTP API
 apps/web         中文 Web 管理台
 packages/domain 领域模型、枚举、输入校验
+packages/mcp     可发布的远程 MCP 适配器 npm 包
 docs             中文产品和技术文档
 examples         HTTP / MCP 调用示例
 ```
@@ -80,6 +91,7 @@ pnpm mcp
 - [数据模型](docs/data-model.md)
 - [MCP 接口](docs/mcp.md)
 - [HTTP API](docs/api.md)
+- [发布说明](docs/release.md)
 
 ## 开源协议
 
