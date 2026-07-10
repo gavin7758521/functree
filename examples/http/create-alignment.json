@@ -1,0 +1,17 @@
+{
+  "name": "登录链路对齐",
+  "relation": "corresponds_to",
+  "status": "proposed",
+  "members": [
+    {
+      "targetType": "feature",
+      "targetId": "feat_req_login",
+      "role": "source"
+    },
+    {
+      "targetType": "feature",
+      "targetId": "feat_app_login",
+      "role": "target"
+    }
+  ]
+}

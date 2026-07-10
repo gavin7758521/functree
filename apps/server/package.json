@@ -1,0 +1,36 @@
+{
+  "name": "@functree/server",
+  "version": "0.2.0",
+  "description": "FuncTree 服务端、HTTP API 与 MCP 服务。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "functree-server": "./dist/index.js",
+    "functree-mcp": "./dist/mcp.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "node --no-warnings=ExperimentalWarning --import tsx src/index.ts --host 0.0.0.0 --port 4174",
+    "start": "node --no-warnings=ExperimentalWarning dist/index.js --host 0.0.0.0 --port 4174",
+    "mcp": "node --no-warnings=ExperimentalWarning --import tsx src/mcp.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@functree/domain": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "fastify": "^5.10.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.23.0",
+    "vitest": "^3.2.4"
+  },
+  "license": "MIT"
+}
