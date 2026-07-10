@@ -264,6 +264,8 @@ describe('FuncTree 服务端', () => {
     });
 
     expect(preview.results[0].operation).toBe('dry_run');
+    expect(preview.results[0].previewId).toMatch(/^preview_feat_/u);
+    expect(preview.results[0].data.id).toMatch(/^preview_feat_/u);
     expect(repo.listFeatures('proj_batch')).toHaveLength(0);
     expect(failed.success).toBe(false);
     expect(failed.rolledBack).toBe(true);
@@ -314,5 +316,109 @@ describe('FuncTree 服务端', () => {
     expect(response.json().message).toBeTruthy();
     expect(response.json().hint).toBeTruthy();
     expect(response.json().requestId).toBeTruthy();
+  });
+
+  it('支持跨 Map 批量功能写入、stableKey 解析和稳定键成员对齐', () => {
+    const repo = new FuncTreeRepository(openMemoryDatabase());
+    const project = repo.createProject({ id: 'proj_stable_refs', name: '稳定键项目', currentVersion: '1.0', status: 'active' });
+    repo.createMap(project.id, { id: 'map_web_refs', stableKey: 'web.chat-ui', name: 'Web 聊天', version: '1.0', axis: 'web', scope: 'implementation', kind: 'app' });
+    repo.createMap(project.id, { id: 'map_backend_refs', stableKey: 'backend.chat-core', name: '聊天后端', version: '1.0', axis: 'backend', scope: 'implementation', kind: 'service' });
+
+    const batch = repo.upsertFeaturesBatch({
+      projectId: project.id,
+      dryRun: false,
+      items: [
+        { mapStableKey: 'web.chat-ui', stableKey: 'composer.send', name: '发送输入框', version: '1.0', kind: 'component' },
+        { mapStableKey: 'backend.chat-core', stableKey: 'message.send', name: '发送消息 API', version: '1.0', kind: 'api' }
+      ]
+    });
+    const entryPoint = repo.createEntryPoint(project.id, {
+      mapStableKey: 'web.chat-ui',
+      stableKey: 'web.room-view',
+      name: '房间视图入口',
+      path: 'src/RoomView.tsx',
+      kind: 'router'
+    });
+    const reference = repo.createCodeReference(project.id, {
+      mapStableKey: 'web.chat-ui',
+      featureStableKey: 'composer.send',
+      featureVersion: '1.0',
+      entryPointStableKey: entryPoint.stableKey,
+      stableKey: 'web.room-view.composer',
+      path: 'src/RoomView.tsx',
+      symbol: 'Composer',
+      kind: 'component'
+    });
+    const resolved = repo.resolveStableKeys({
+      projectId: project.id,
+      items: [
+        { type: 'map', stableKey: 'web.chat-ui' },
+        { type: 'feature', stableKey: 'composer.send', mapStableKey: 'web.chat-ui', version: '1.0' },
+        { type: 'entry_point', stableKey: 'web.room-view' },
+        { type: 'code_reference', stableKey: 'web.room-view.composer' }
+      ]
+    });
+    const alignment = repo.upsertAlignment(project.id, {
+      stableKey: 'align.send-message.web-backend',
+      name: '发送消息前后端对齐',
+      members: [
+        { targetType: 'feature', stableKey: 'composer.send', mapStableKey: 'web.chat-ui', version: '1.0', role: 'source' },
+        { targetType: 'feature', stableKey: 'message.send', mapStableKey: 'backend.chat-core', version: '1.0', role: 'target' },
+        { targetType: 'code_reference', stableKey: reference.stableKey, role: 'evidence' }
+      ]
+    });
+    const lite = repo.queryContext({ projectId: project.id, types: ['feature'], view: 'lite', limit: 10 });
+    const alignments = repo.queryContext({ projectId: project.id, types: ['alignment'], includeMembers: false });
+
+    expect(batch.success).toBe(true);
+    expect(batch.results).toHaveLength(2);
+    expect(resolved.results.every((item) => item.found)).toBe(true);
+    expect(alignment.operation).toBe('created');
+    expect(alignment.data.members).toHaveLength(3);
+    expect(lite.features[0]).toEqual(expect.objectContaining({ type: 'feature', stableKey: expect.any(String), mapId: expect.any(String) }));
+    expect((lite.features[0] as Record<string, unknown>).metadata).toBeUndefined();
+    expect(alignments.alignments[0].members).toHaveLength(0);
+  });
+
+  it('记录扫描 commit，并支持项目摘要与路径上下文查询', () => {
+    const repo = new FuncTreeRepository(openMemoryDatabase());
+    const project = repo.createProject({ id: 'proj_scan', name: '扫描项目', currentVersion: '1.0', status: 'active' });
+    repo.createMap(project.id, { id: 'map_scan_web', stableKey: 'web.scan', name: '扫描前端', version: '1.0', axis: 'web', scope: 'implementation', kind: 'app' });
+    const scan = repo.beginScan({
+      projectId: project.id,
+      repoKey: 'github:gavin7758521/functree',
+      branch: 'main',
+      commitSha: 'abcdef1',
+      baseCommitSha: 'abcde00',
+      worktreeDirty: false
+    });
+    const entryPoint = repo.createEntryPoint(project.id, {
+      mapStableKey: 'web.scan',
+      stableKey: 'web.scan.root',
+      name: '扫描入口',
+      path: 'src/main.tsx',
+      kind: 'app_root',
+      scanRunId: scan.id
+    });
+    const reference = repo.createCodeReference(project.id, {
+      mapStableKey: 'web.scan',
+      entryPointStableKey: entryPoint.stableKey,
+      stableKey: 'web.scan.bootstrap',
+      path: 'src/main.tsx',
+      symbol: 'bootstrap',
+      kind: 'function',
+      scanRunId: scan.id
+    });
+    const finished = repo.finishScan({ scanRunId: scan.id, status: 'completed', summary: { entryPoints: 1, codeReferences: 1 } });
+    const summary = repo.projectSummary({ projectId: project.id });
+    const pathContext = repo.queryPathContext({ projectId: project.id, path: 'src/main.tsx', pathMode: 'exact' });
+
+    expect(finished.status).toBe('completed');
+    expect(summary.latestScanRun?.commitSha).toBe('abcdef1');
+    expect(summary.scanRunCount).toBe(1);
+    expect(pathContext.entryPoints[0].id).toBe(entryPoint.id);
+    expect(pathContext.codeReferences[0].id).toBe(reference.id);
+    expect(pathContext.maps[0].stableKey).toBe('web.scan');
+    expect(reference.lastSeenCommitSha).toBe('abcdef1');
   });
 });

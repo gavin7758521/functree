@@ -72,6 +72,10 @@ export const AlignmentRelationSchema = z.enum([
 export const AlignmentStatusSchema = z.enum(['proposed', 'confirmed', 'rejected', 'stale']);
 export const AlignmentRoleSchema = z.enum(['source', 'target', 'peer', 'evidence']);
 export const QueryContextTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+export const QueryContextViewSchema = z.enum(['full', 'lite']);
+export const PathMatchModeSchema = z.enum(['contains', 'exact', 'prefix']);
+export const ResolveStableKeyTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+export const ScanRunStatusSchema = z.enum(['running', 'completed', 'failed', 'cancelled']);
 
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export type MapAxis = z.infer<typeof MapAxisSchema>;
@@ -87,6 +91,10 @@ export type AlignmentRelation = z.infer<typeof AlignmentRelationSchema>;
 export type AlignmentStatus = z.infer<typeof AlignmentStatusSchema>;
 export type AlignmentRole = z.infer<typeof AlignmentRoleSchema>;
 export type QueryContextType = z.infer<typeof QueryContextTypeSchema>;
+export type QueryContextView = z.infer<typeof QueryContextViewSchema>;
+export type PathMatchMode = z.infer<typeof PathMatchModeSchema>;
+export type ResolveStableKeyType = z.infer<typeof ResolveStableKeyTypeSchema>;
+export type ScanRunStatus = z.infer<typeof ScanRunStatusSchema>;
 
 const IdSchema = z
   .string()
@@ -103,6 +111,12 @@ const TagsSchema = z.array(z.string().trim().min(1).max(60)).max(40).optional().
 export const QUERY_CONTEXT_MAX_LIMIT = 200;
 const StableKeySchema = z.string().trim().min(1).max(180);
 const PathSchema = z.string().trim().min(1).max(600);
+const CommitShaSchema = z
+  .string()
+  .trim()
+  .min(7)
+  .max(64)
+  .regex(/^[0-9a-fA-F]+$/u, 'commitSha 必须是 7 到 64 位十六进制 Git commit。');
 const DryRunSchema = z.boolean().optional().default(false);
 
 export const CreateProjectSchema = z.object({
@@ -139,6 +153,7 @@ export const CreateFeatureSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
   mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
   parentFeatureId: IdSchema.nullable().optional().default(null),
   stableKey: StableKeySchema,
   name: TextSchema,
@@ -163,12 +178,14 @@ export const CreateEntryPointSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
   mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
   stableKey: StableKeySchema,
   name: TextSchema,
   path: PathSchema,
   kind: EntryPointKindSchema,
   description: OptionalTextSchema,
   confidence: z.number().min(0).max(1).optional().default(1),
+  scanRunId: IdSchema.optional(),
   metadata: MetadataSchema,
   dryRun: DryRunSchema
 });
@@ -179,8 +196,12 @@ export const CreateCodeReferenceSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
   mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
   featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
   entryPointId: IdSchema.optional(),
+  entryPointStableKey: StableKeySchema.optional(),
   stableKey: StableKeySchema.optional(),
   path: PathSchema,
   symbol: OptionalShortTextSchema,
@@ -188,6 +209,7 @@ export const CreateCodeReferenceSchema = z.object({
   description: OptionalTextSchema,
   lineStart: z.number().int().min(1).max(1000000).nullable().optional().default(null),
   lineEnd: z.number().int().min(1).max(1000000).nullable().optional().default(null),
+  scanRunId: IdSchema.optional(),
   metadata: MetadataSchema,
   dryRun: DryRunSchema
 });
@@ -196,9 +218,16 @@ export const UpdateCodeReferenceSchema = CreateCodeReferenceSchema.partial().omi
 
 export const AlignmentMemberSchema = z.object({
   targetType: AlignableTypeSchema,
-  targetId: IdSchema,
+  targetId: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  version: z.string().trim().min(1).max(80).optional(),
   role: AlignmentRoleSchema.default('peer'),
   note: z.string().trim().max(1000).optional().default('')
+}).refine((member) => Boolean(member.targetId || member.stableKey), {
+  message: 'alignment member 需要 targetId 或 stableKey。',
+  path: ['targetId']
 });
 
 export const CreateAlignmentSchema = z.object({
@@ -220,13 +249,19 @@ export const QueryContextSchema = z.object({
   projectId: IdSchema.optional(),
   keyword: z.string().trim().max(120).optional().default(''),
   types: z.array(QueryContextTypeSchema).min(1).max(6).optional(),
+  view: QueryContextViewSchema.optional().default('full'),
+  includeSummaryOnly: z.boolean().optional().default(false),
+  includeMembers: z.boolean().optional().default(true),
+  includeMetadata: z.boolean().optional().default(true),
   mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
   stableKey: z.string().trim().min(1).max(180).optional(),
   alignmentId: IdSchema.optional(),
   parentFeatureId: IdSchema.nullable().optional(),
   entryPointId: IdSchema.optional(),
   codeReferenceId: IdSchema.optional(),
   path: z.string().trim().min(1).max(600).optional(),
+  pathMode: PathMatchModeSchema.optional().default('contains'),
   limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().default(20),
   offset: z.number().int().min(0).max(100000).optional().default(0),
   cursor: z.string().trim().max(40).optional()
@@ -239,9 +274,28 @@ export const BatchMapSchema = z.object({
 });
 
 export const BatchFeatureSchema = z.object({
-  mapId: IdSchema,
+  projectId: IdSchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
   dryRun: DryRunSchema,
-  items: z.array(CreateFeatureSchema.omit({ projectId: true, mapId: true, dryRun: true })).min(1).max(300)
+  items: z.array(CreateFeatureSchema.omit({ projectId: true, dryRun: true })).min(1).max(300)
+}).superRefine((batch, context) => {
+  const hasItemWithoutMap = batch.items.some((item) => !item.mapId && !item.mapStableKey);
+  if (hasItemWithoutMap && !batch.mapId && !batch.mapStableKey) {
+    context.addIssue({
+      code: 'custom',
+      message: '批量写入功能时，需要提供顶层 mapId/mapStableKey，或在每个 item 上提供 mapId/mapStableKey。',
+      path: ['items']
+    });
+  }
+  const needsProjectId = Boolean(batch.mapStableKey || batch.items.some((item) => item.mapStableKey));
+  if (needsProjectId && !batch.projectId) {
+    context.addIssue({
+      code: 'custom',
+      message: '使用 mapStableKey 写入功能时 projectId 必填。',
+      path: ['projectId']
+    });
+  }
 });
 
 export const BatchEntryPointSchema = z.object({
@@ -262,6 +316,57 @@ export const BatchAlignmentSchema = z.object({
   items: z.array(CreateAlignmentSchema.omit({ projectId: true, dryRun: true })).min(1).max(100)
 });
 
+export const ResolveStableKeyItemSchema = z.object({
+  type: ResolveStableKeyTypeSchema,
+  id: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  version: z.string().trim().min(1).max(80).optional(),
+  path: PathSchema.optional(),
+  symbol: OptionalShortTextSchema,
+  kind: z.union([FeatureKindSchema, EntryPointKindSchema, CodeReferenceKindSchema]).optional()
+}).refine((item) => Boolean(item.id || item.stableKey || item.path), {
+  message: '解析 stableKey 时需要 id、stableKey 或 path。',
+  path: ['stableKey']
+});
+
+export const ResolveStableKeysSchema = z.object({
+  projectId: IdSchema,
+  items: z.array(ResolveStableKeyItemSchema).min(1).max(500)
+});
+
+export const ProjectSummarySchema = z.object({
+  projectId: IdSchema
+});
+
+export const QueryPathContextSchema = z.object({
+  projectId: IdSchema,
+  path: PathSchema,
+  pathMode: PathMatchModeSchema.optional().default('contains'),
+  includeAlignments: z.boolean().optional().default(true),
+  includeReferences: z.boolean().optional().default(true)
+});
+
+export const BeginScanSchema = z.object({
+  id: IdSchema.optional(),
+  projectId: IdSchema,
+  repoKey: z.string().trim().min(1).max(180),
+  repoUrl: z.string().trim().max(500).optional().default(''),
+  branch: z.string().trim().max(180).optional().default(''),
+  commitSha: CommitShaSchema,
+  baseCommitSha: CommitShaSchema.optional(),
+  worktreeDirty: z.boolean().optional().default(false),
+  metadata: MetadataSchema
+});
+
+export const FinishScanSchema = z.object({
+  scanRunId: IdSchema,
+  status: ScanRunStatusSchema.exclude(['running']).default('completed'),
+  summary: z.record(z.string(), z.unknown()).optional().default({}),
+  metadata: MetadataSchema
+});
+
 export type CreateProjectInput = z.input<typeof CreateProjectSchema>;
 export type CreateMapInput = z.input<typeof CreateMapSchema>;
 export type CreateFeatureInput = z.input<typeof CreateFeatureSchema>;
@@ -274,6 +379,11 @@ export type BatchFeatureInput = z.input<typeof BatchFeatureSchema>;
 export type BatchEntryPointInput = z.input<typeof BatchEntryPointSchema>;
 export type BatchCodeReferenceInput = z.input<typeof BatchCodeReferenceSchema>;
 export type BatchAlignmentInput = z.input<typeof BatchAlignmentSchema>;
+export type ResolveStableKeysInput = z.input<typeof ResolveStableKeysSchema>;
+export type ProjectSummaryInput = z.input<typeof ProjectSummarySchema>;
+export type QueryPathContextInput = z.input<typeof QueryPathContextSchema>;
+export type BeginScanInput = z.input<typeof BeginScanSchema>;
+export type FinishScanInput = z.input<typeof FinishScanSchema>;
 
 export const labels = {
   projectStatus: {

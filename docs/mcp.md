@@ -98,9 +98,15 @@ approval_mode = "approve"
 
 [mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_begin_scan]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_finish_scan]
+approval_mode = "approve"
 ```
 
-`functree_query_context` 是只读查询工具，可以不配置审批。
+`functree_query_context`、`functree_resolve_stable_keys`、`functree_project_summary`、`functree_query_path_context` 是只读查询工具，可以不配置审批。
 
 ## 让 Codex 分析项目
 
@@ -113,7 +119,7 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 3. 每个 Map 下的核心 Feature
 4. EntryPoint 和 CodeReference
 5. 产品、前端、后端、测试之间的 Alignment
-写入前先调用 functree_query_context 查重；大量写入先 dryRun。
+写入前先调用 functree_query_context 或 functree_resolve_stable_keys 查重；大量写入先 dryRun。扫描仓库时先 functree_begin_scan，写入入口文件和代码引用时带 scanRunId，结束后 functree_finish_scan。
 ```
 
 ## 工具
@@ -163,13 +169,15 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 
 必填：
 
-- `mapId`
+- `mapId`，或 `projectId + mapStableKey`
 - `stableKey`
 - `name`
 
 可选：
 
 - `id`
+- `projectId`
+- `mapStableKey`
 - `parentFeatureId`
 - `version`
 - `status`
@@ -196,6 +204,8 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 
 - `id`
 - `mapId`
+- `mapStableKey`
+- `scanRunId`
 - `description`
 - `confidence`
 - `metadata`
@@ -215,9 +225,14 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 
 - `id`
 - `mapId`
+- `mapStableKey`
 - `featureId`
+- `featureStableKey`
+- `featureVersion`
 - `entryPointId`
+- `entryPointStableKey`
 - `stableKey`
+- `scanRunId`
 - `symbol`
 - `description`
 - `lineStart`
@@ -235,7 +250,7 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `name`
 - `members`
 
-`members` 至少包含两个对象，对象可以是 `project`、`map`、`feature`、`entry_point` 或 `code_reference`。
+`members` 至少包含两个对象，对象可以是 `project`、`map`、`feature`、`entry_point` 或 `code_reference`。成员可以传 `targetId`，也可以传 `stableKey`；功能成员建议同时传 `mapStableKey` 和 `version` 避免歧义。
 
 ### batch 工具
 
@@ -249,12 +264,15 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 
 每个 batch 支持 `dryRun: true`。写入模式下如果某一项失败，会回滚本批次已写入项，并返回 `errors[index, code, message, hint]`。
 
+`functree_upsert_features_batch` 支持顶层 `mapId/mapStableKey`，也支持每个 item 自己带 `mapId/mapStableKey`，可以一次写入多个 Map 下的功能。使用 `mapStableKey` 时必须提供 `projectId`。
+
 单项 upsert 和 batch 结果包含：
 
 - `operation`: `created` / `updated` / `unchanged` / `dry_run`
 - `changedFields`
 - `data`
 - `dryRun`
+- `previewId`：仅 dry-run 新建对象时出现，且对象 ID 会以 `preview_` 开头，不能当作真实 ID 复用
 
 ### functree_query_context
 
@@ -266,17 +284,75 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `keyword`
 - `limit`：1 到 200，默认 20
 - `types`：例如 `["feature"]`
+- `view`：`full` / `lite`。`lite` 只返回 `id/stableKey/name/type/mapId/path` 等轻量字段
+- `includeSummaryOnly`
+- `includeMembers`：查询 alignment 时可设为 `false` 降低上下文体积
+- `includeMetadata`
 - `mapId`
+- `mapStableKey`
 - `stableKey`
 - `alignmentId`
 - `parentFeatureId`
 - `entryPointId`
 - `codeReferenceId`
 - `path`
+- `pathMode`：`contains` / `exact` / `prefix`
 - `offset`
 - `cursor`
 
-返回包含 `page.nextCursor`，下一页请求传入 `cursor` 即可。`summary` 返回功能地图数、功能数、入口文件数、代码引用数、对齐关系数、最近更新时间和 stableKey 冲突数。
+返回包含 `page.nextCursor`，下一页请求传入 `cursor` 即可。`summary` 返回功能地图数、功能数、入口文件数、代码引用数、对齐关系数、扫描数、最近更新时间、最近扫描、stableKey 冲突数和孤儿代码引用数。
+
+### functree_resolve_stable_keys
+
+批量把 stableKey 解析成真实 ID，适合写 alignment 前准备 ID 映射。
+
+必填：
+
+- `projectId`
+- `items`
+
+`items` 每项包含：
+
+- `type`: `project` / `map` / `feature` / `alignment` / `entry_point` / `code_reference`
+- `stableKey`，或 `id/path`
+- `mapStableKey` / `mapId` / `version`：用于消除 feature 歧义
+
+### functree_project_summary
+
+只读项目统计，适合大规模同步后确认最终状态。
+
+必填：
+
+- `projectId`
+
+### functree_query_path_context
+
+按文件路径查询已有入口文件、代码引用，以及关联的功能地图、功能和对齐关系。适合增量扫描某个文件前查重。
+
+必填：
+
+- `projectId`
+- `path`
+
+可选：
+
+- `pathMode`
+- `includeAlignments`
+- `includeReferences`
+
+### functree_begin_scan / functree_finish_scan
+
+`functree_begin_scan` 记录一次仓库扫描：
+
+- `projectId`
+- `repoKey`
+- `commitSha`
+- `branch`
+- `baseCommitSha`
+- `worktreeDirty`
+- `metadata`
+
+返回的 `id` 可作为 `scanRunId` 写入 entry point 和 code reference。扫描完成后调用 `functree_finish_scan`，写入 `status` 和 `summary`。
 
 ## 打包边界
 

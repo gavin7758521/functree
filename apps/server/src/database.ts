@@ -82,6 +82,10 @@ function migrate(db: Db): void {
       kind TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       confidence REAL NOT NULL DEFAULT 1,
+      first_seen_scan_run_id TEXT,
+      last_seen_scan_run_id TEXT,
+      last_seen_commit_sha TEXT NOT NULL DEFAULT '',
+      last_scanned_at TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -101,7 +105,29 @@ function migrate(db: Db): void {
       description TEXT NOT NULL DEFAULT '',
       line_start INTEGER,
       line_end INTEGER,
+      first_seen_scan_run_id TEXT,
+      last_seen_scan_run_id TEXT,
+      last_seen_commit_sha TEXT NOT NULL DEFAULT '',
+      last_scanned_at TEXT,
       metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS scan_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      repo_key TEXT NOT NULL,
+      repo_url TEXT NOT NULL DEFAULT '',
+      branch TEXT NOT NULL DEFAULT '',
+      commit_sha TEXT NOT NULL,
+      base_commit_sha TEXT NOT NULL DEFAULT '',
+      worktree_dirty INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL,
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -151,6 +177,8 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_code_references_feature ON code_references(feature_id);
     CREATE INDEX IF NOT EXISTS idx_code_references_entry_point ON code_references(entry_point_id);
     CREATE INDEX IF NOT EXISTS idx_code_references_path ON code_references(path);
+    CREATE INDEX IF NOT EXISTS idx_scan_runs_project ON scan_runs(project_id);
+    CREATE INDEX IF NOT EXISTS idx_scan_runs_repo_commit ON scan_runs(project_id, repo_key, branch, commit_sha);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_code_references_project_stable_key
       ON code_references(project_id, stable_key)
       WHERE stable_key <> '';
@@ -164,4 +192,25 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_alignment_members_alignment ON alignment_members(alignment_id);
     CREATE INDEX IF NOT EXISTS idx_alignment_members_target ON alignment_members(target_type, target_id);
   `);
+
+  ensureColumn(db, 'entry_points', 'first_seen_scan_run_id', 'TEXT');
+  ensureColumn(db, 'entry_points', 'last_seen_scan_run_id', 'TEXT');
+  ensureColumn(db, 'entry_points', 'last_seen_commit_sha', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'entry_points', 'last_scanned_at', 'TEXT');
+  ensureColumn(db, 'code_references', 'first_seen_scan_run_id', 'TEXT');
+  ensureColumn(db, 'code_references', 'last_seen_scan_run_id', 'TEXT');
+  ensureColumn(db, 'code_references', 'last_seen_commit_sha', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'code_references', 'last_scanned_at', 'TEXT');
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_entry_points_last_seen_scan ON entry_points(last_seen_scan_run_id);
+    CREATE INDEX IF NOT EXISTS idx_code_references_last_seen_scan ON code_references(last_seen_scan_run_id);
+  `);
+}
+
+function ensureColumn(db: Db, tableName: string, columnName: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
 }

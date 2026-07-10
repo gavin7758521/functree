@@ -1,11 +1,16 @@
 import {
+  BeginScanSchema,
   CreateAlignmentSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
+  FinishScanSchema,
+  ProjectSummarySchema,
+  QueryPathContextSchema,
   QueryContextSchema,
+  ResolveStableKeysSchema,
   labels
 } from '@functree/domain';
 import fastify, { type FastifyInstance } from 'fastify';
@@ -42,7 +47,7 @@ export function createHttpServer(db: Db): FastifyInstance {
       reply.status(400).send({
         code: 'VALIDATION_ERROR',
         message: '输入校验失败。',
-        hint: '检查字段类型、枚举值、必填字段和数值范围后重试。',
+        hint: zodHint(error),
         requestId,
         details: error.issues
       });
@@ -83,6 +88,7 @@ export function createHttpServer(db: Db): FastifyInstance {
   app.post('/api/projects', async (request) => repo.createProject(CreateProjectSchema.parse(request.body)));
   app.get('/api/projects/:projectId', async (request) => repo.getProject(params(request).projectId));
   app.get('/api/projects/:projectId/tree', async (request) => repo.getProjectTree(params(request).projectId));
+  app.get('/api/projects/:projectId/summary', async (request) => repo.projectSummary(ProjectSummarySchema.parse({ projectId: params(request).projectId })));
 
   app.get('/api/projects/:projectId/maps', async (request) => repo.listMaps(params(request).projectId));
   app.post('/api/projects/:projectId/maps', async (request) => {
@@ -113,6 +119,19 @@ export function createHttpServer(db: Db): FastifyInstance {
     const input = CreateAlignmentSchema.parse(request.body);
     return repo.createAlignment(params(request).projectId, input);
   });
+
+  app.post('/api/projects/:projectId/resolve-stable-keys', async (request) =>
+    repo.resolveStableKeys(ResolveStableKeysSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.get('/api/projects/:projectId/path-context', async (request) =>
+    repo.queryPathContext(QueryPathContextSchema.parse({ ...(request.query as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/scan-runs', async (request) =>
+    repo.beginScan(BeginScanSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/scan-runs/:scanRunId/finish', async (request) =>
+    repo.finishScan(FinishScanSchema.parse({ ...(request.body as Record<string, unknown>), scanRunId: params(request).scanRunId }))
+  );
 
   app.get('/api/mcp/tools', async () => ({ tools: toolDefinitions }));
   app.post('/api/mcp/call', async (request) => {
@@ -164,4 +183,12 @@ function contentType(filePath: string): string {
   if (filePath.endsWith('.css')) return 'text/css; charset=utf-8';
   if (filePath.endsWith('.svg')) return 'image/svg+xml';
   return 'application/octet-stream';
+}
+
+function zodHint(error: ZodError): string {
+  const kindIssue = error.issues.find((issue) => issue.path.at(-1) === 'kind');
+  if (kindIssue) {
+    return 'kind 枚举不支持该值。feature.kind 请使用 capability/module/page/api/component/process/rule/test/doc/data/operation/other；部署或配置视角优先放在 map.kind 或 entry_point/code_reference.kind。';
+  }
+  return '检查字段类型、枚举值、必填字段和数值范围后重试。';
 }

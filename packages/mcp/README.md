@@ -71,28 +71,39 @@ approval_mode = "approve"
 
 [mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_begin_scan]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_finish_scan]
+approval_mode = "approve"
 ```
 
-`functree_query_context` is read-only.
+`functree_query_context`, `functree_resolve_stable_keys`, `functree_project_summary`, and `functree_query_path_context` are read-only.
 
 ## Tools
 
 - `functree_create_project`: create or update a FuncTree project.
 - `functree_upsert_map`: create or update a project map by `id` or `stableKey`.
-- `functree_upsert_feature`: create or update a feature under a map by `id` or `stableKey` + `version`.
-- `functree_upsert_entry_point`: create or update an analysis entry point.
-- `functree_upsert_code_reference`: create or update a code reference by `id`, `stableKey`, or path signature.
-- `functree_upsert_alignment`: create or update a cross-layer alignment relation by `id`, `stableKey`, or member set.
+- `functree_upsert_feature`: create or update a feature under a map by `id` or `stableKey` + `version`; accepts `mapId` or `projectId + mapStableKey`.
+- `functree_upsert_entry_point`: create or update an analysis entry point; accepts `mapStableKey` and `scanRunId`.
+- `functree_upsert_code_reference`: create or update a code reference by `id`, `stableKey`, or path signature; accepts `mapStableKey`, `featureStableKey`, `entryPointStableKey`, and `scanRunId`.
+- `functree_upsert_alignment`: create or update a cross-layer alignment relation by `id`, `stableKey`, or member set. Members can use `targetId` or stable keys.
 - `functree_upsert_maps_batch`: batch upsert maps with `dryRun` and per-item errors.
-- `functree_upsert_features_batch`: batch upsert features with `dryRun` and rollback on write failure.
+- `functree_upsert_features_batch`: batch upsert features across one or more maps with `dryRun` and rollback on write failure.
 - `functree_upsert_entry_points_batch`: batch upsert entry points.
 - `functree_upsert_code_references_batch`: batch upsert code references.
 - `functree_upsert_alignments_batch`: batch upsert alignments with member-set de-duplication.
-- `functree_query_context`: read project, map, feature, entry point, code reference, and alignment context with filters and cursor pagination.
+- `functree_query_context`: read project, map, feature, entry point, code reference, and alignment context with filters, `view: "lite"`, summary-only mode, and cursor pagination.
+- `functree_resolve_stable_keys`: resolve stable keys to concrete IDs in bulk.
+- `functree_project_summary`: read project counts, latest scan, conflicts, and orphan reference counts.
+- `functree_query_path_context`: read existing entry points/code references and related objects for a path.
+- `functree_begin_scan`: record the start of a Git commit scan.
+- `functree_finish_scan`: finish a scan and store its summary.
 
-Write tools return `operation`, `changedFields`, `data`, and `dryRun`. `operation` is `created`, `updated`, `unchanged`, or `dry_run`.
+Write tools return `operation`, `changedFields`, `data`, `dryRun`, and sometimes `previewId`. `operation` is `created`, `updated`, `unchanged`, or `dry_run`. Dry-run-created IDs are prefixed with `preview_` and must not be reused as real IDs.
 
-`functree_query_context` supports `types`, `mapId`, `stableKey`, `alignmentId`, `parentFeatureId`, `entryPointId`, `codeReferenceId`, `path`, `offset`, and `cursor`; use `page.nextCursor` to fetch the next page.
+`functree_query_context` supports `types`, `view`, `includeSummaryOnly`, `includeMembers`, `includeMetadata`, `mapId`, `mapStableKey`, `stableKey`, `alignmentId`, `parentFeatureId`, `entryPointId`, `codeReferenceId`, `path`, `pathMode`, `offset`, and `cursor`; use `page.nextCursor` to fetch the next page.
 
 ## Packaging note
 

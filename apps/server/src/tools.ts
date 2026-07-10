@@ -4,13 +4,18 @@ import {
   BatchEntryPointSchema,
   BatchFeatureSchema,
   BatchMapSchema,
+  BeginScanSchema,
   CreateAlignmentSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
-  QueryContextSchema
+  FinishScanSchema,
+  ProjectSummarySchema,
+  QueryPathContextSchema,
+  QueryContextSchema,
+  ResolveStableKeysSchema
 } from '@functree/domain';
 import { ValidationError, type FuncTreeRepository } from './repository.js';
 
@@ -53,7 +58,7 @@ export const toolDefinitions = [
   {
     name: 'functree_upsert_features_batch',
     title: '批量写入功能',
-    description: '在同一功能地图下批量 upsert 功能，支持 dryRun，并在失败时返回具体失败项。'
+    description: '批量 upsert 功能，支持顶层或 item 级 mapId/mapStableKey，可一次写入多个功能地图；支持 dryRun，并在失败时返回具体失败项。'
   },
   {
     name: 'functree_upsert_entry_points_batch',
@@ -73,7 +78,32 @@ export const toolDefinitions = [
   {
     name: 'functree_query_context',
     title: '查询上下文',
-    description: '只读查询 FuncTree 项目、功能地图、功能、入口文件、代码引用和对齐关系，支持 keyword、types、stableKey、mapId、alignmentId、parentFeatureId、entryPointId、codeReferenceId、path、offset/cursor 与统计摘要。'
+    description: '只读查询 FuncTree 项目、功能地图、功能、入口文件、代码引用和对齐关系，支持 lite 轻量模式、summaryOnly、includeMembers、keyword、types、stableKey、mapId/mapStableKey、path、offset/cursor 与统计摘要。'
+  },
+  {
+    name: 'functree_resolve_stable_keys',
+    title: '批量解析 stableKey',
+    description: '只读批量解析 project/map/feature/entry_point/code_reference/alignment 的 stableKey 到真实 ID，支持 mapStableKey 与 version，避免上下文截断后手工复制 ID。'
+  },
+  {
+    name: 'functree_project_summary',
+    title: '项目摘要',
+    description: '只读返回项目级统计、最近扫描、stableKey 冲突和孤儿代码引用数量，供大规模同步后确认。'
+  },
+  {
+    name: 'functree_query_path_context',
+    title: '按路径查询上下文',
+    description: '只读查询某个 path 下已有入口文件、代码引用，以及关联的功能地图、功能和对齐关系，适合增量扫描。'
+  },
+  {
+    name: 'functree_begin_scan',
+    title: '开始扫描记录',
+    description: '记录一次仓库扫描的 repoKey、branch、commitSha 和 dirty 状态，后续入口文件/代码引用可用 scanRunId 标记首次和最近发现。'
+  },
+  {
+    name: 'functree_finish_scan',
+    title: '结束扫描记录',
+    description: '结束一次扫描并写入 summary，状态支持 completed、failed、cancelled。'
   }
 ];
 
@@ -93,10 +123,10 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     }
     case 'functree_upsert_feature': {
       const input = CreateFeatureSchema.parse(args);
-      if (!input.mapId) {
-        throw new ValidationError('mapId 必填。');
+      if (!input.mapId && !input.mapStableKey) {
+        throw new ValidationError('mapId 或 mapStableKey 必填。');
       }
-      return repo.upsertFeature(input.mapId, input);
+      return repo.upsertFeatureByReference(input);
     }
     case 'functree_upsert_entry_point': {
       const input = CreateEntryPointSchema.parse(args);
@@ -136,6 +166,21 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     }
     case 'functree_query_context': {
       return repo.queryContext(QueryContextSchema.parse(args));
+    }
+    case 'functree_resolve_stable_keys': {
+      return repo.resolveStableKeys(ResolveStableKeysSchema.parse(args));
+    }
+    case 'functree_project_summary': {
+      return repo.projectSummary(ProjectSummarySchema.parse(args));
+    }
+    case 'functree_query_path_context': {
+      return repo.queryPathContext(QueryPathContextSchema.parse(args));
+    }
+    case 'functree_begin_scan': {
+      return repo.beginScan(BeginScanSchema.parse(args));
+    }
+    case 'functree_finish_scan': {
+      return repo.finishScan(FinishScanSchema.parse(args));
     }
     default:
       throw new Error(`未知工具: ${name}`);

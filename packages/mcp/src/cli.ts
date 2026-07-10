@@ -33,6 +33,10 @@ const alignmentRelations = [
 const alignmentStatuses = ['proposed', 'confirmed', 'rejected', 'stale'] as const;
 const alignmentRoles = ['source', 'target', 'peer', 'evidence'] as const;
 const queryContextTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
+const queryContextViews = ['full', 'lite'] as const;
+const pathMatchModes = ['contains', 'exact', 'prefix'] as const;
+const resolveStableKeyTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
+const scanRunStatuses = ['completed', 'failed', 'cancelled'] as const;
 
 type Config = {
   serverUrl: string;
@@ -44,7 +48,11 @@ const tagsSchema = z.array(z.string().min(1).max(60)).max(40).optional().describ
 const dryRunSchema = z.boolean().optional().describe('When true, return the planned operation and changed fields without writing data.');
 const alignmentMemberSchema = z.object({
   targetType: z.enum(alignableTypes).describe('Type of aligned object.'),
-  targetId: z.string().describe('ID of the aligned object.'),
+  targetId: z.string().optional().describe('ID of the aligned object. Optional when stableKey is provided.'),
+  stableKey: z.string().optional().describe('Stable key of the aligned object. For features, include mapStableKey or mapId when needed.'),
+  mapId: z.string().optional().describe('Optional map ID used to disambiguate feature stableKey members.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey used to disambiguate feature stableKey members.'),
+  version: z.string().optional().describe('Optional feature version used to disambiguate feature stableKey members.'),
   role: z.enum(alignmentRoles).optional().describe('Role of this member in the alignment. Defaults to peer.'),
   note: z.string().optional().describe('Optional member-specific note.')
 });
@@ -66,6 +74,8 @@ const mapItemShape = {
 
 const featureItemShape = {
   id: z.string().optional().describe('Optional concrete feature object ID. If omitted, FuncTree generates one.'),
+  mapId: z.string().optional().describe('Optional map ID. Batch items can override the batch-level map.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey, for example web.chat-ui or backend.matrix-chat-core. Requires projectId.'),
   parentFeatureId: z.string().nullable().optional().describe('Optional parent feature ID for child features.'),
   stableKey: z.string().describe('Long-lived feature key inside the map, for example send-message or timeline.sync.'),
   name: z.string().describe('Feature display name.'),
@@ -81,20 +91,26 @@ const featureItemShape = {
 const entryPointItemShape = {
   id: z.string().optional().describe('Optional concrete entry point ID. If omitted, FuncTree generates one.'),
   mapId: z.string().optional().describe('Optional map ID this entry point belongs to.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey this entry point belongs to.'),
   stableKey: z.string().describe('Long-lived entry point key, for example web.app-root, backend.server-bootstrap, or ops.deploy-config.'),
   name: z.string().describe('Entry point display name.'),
   path: z.string().describe('Repository path or config path used as an analysis starting point.'),
   kind: z.enum(entryPointKinds).describe('Entry point kind.'),
   description: z.string().optional().describe('Why this file/config is an entry point.'),
   confidence: z.number().min(0).max(1).optional().describe('Confidence score from 0 to 1. Defaults to 1.'),
+  scanRunId: z.string().optional().describe('Optional scan run ID marking where this entry point was discovered.'),
   metadata: metadataSchema
 };
 
 const codeReferenceItemShape = {
   id: z.string().optional().describe('Optional concrete code reference ID. If omitted, FuncTree generates one.'),
   mapId: z.string().optional().describe('Optional map ID this reference belongs to.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey this reference belongs to.'),
   featureId: z.string().optional().describe('Optional feature ID this reference implements or documents.'),
+  featureStableKey: z.string().optional().describe('Optional feature stableKey this reference implements or documents. Provide mapStableKey/mapId if ambiguous.'),
+  featureVersion: z.string().optional().describe('Optional feature version used with featureStableKey.'),
   entryPointId: z.string().optional().describe('Optional entry point ID this reference is discovered from.'),
+  entryPointStableKey: z.string().optional().describe('Optional entry point stableKey this reference is discovered from.'),
   stableKey: z.string().optional().describe('Optional long-lived reference key. If omitted, FuncTree de-duplicates by project, path, symbol, kind, and ownership.'),
   path: z.string().describe('Repository file path or document path.'),
   symbol: z.string().optional().describe('Optional symbol, route, table, component, function, class, or section name.'),
@@ -102,8 +118,21 @@ const codeReferenceItemShape = {
   description: z.string().optional().describe('Human-readable reason this code reference matters.'),
   lineStart: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based start line.'),
   lineEnd: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based end line.'),
+  scanRunId: z.string().optional().describe('Optional scan run ID marking where this code reference was discovered.'),
   metadata: metadataSchema
 };
+
+const resolveStableKeyItemSchema = z.object({
+  type: z.enum(resolveStableKeyTypes).describe('Object type to resolve.'),
+  id: z.string().optional().describe('Optional concrete ID to validate within this project.'),
+  stableKey: z.string().optional().describe('Stable key to resolve.'),
+  mapId: z.string().optional().describe('Optional map ID for feature disambiguation.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey for feature disambiguation.'),
+  version: z.string().optional().describe('Optional feature version for feature disambiguation.'),
+  path: z.string().optional().describe('Optional path fallback for entry_point or code_reference lookup.'),
+  symbol: z.string().optional().describe('Optional code reference symbol used with path.'),
+  kind: z.string().optional().describe('Optional code reference kind used with path.')
+});
 
 const alignmentItemShape = {
   id: z.string().optional().describe('Optional alignment ID. If omitted, FuncTree generates one.'),
@@ -133,10 +162,14 @@ const server = new McpServer(
       'Code references connect features and maps to concrete files, symbols, routes, tables, migrations, configs, tests, or documents.',
       'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not store business data.',
       'Use functree_query_context before writing when IDs, stableKeys, existing maps, features, entry points, code references, or alignments are uncertain.',
-      'functree_query_context is read-only and supports keyword, types, stableKey, mapId, alignmentId, parentFeatureId, entryPointId, codeReferenceId, path, offset, and cursor filters.',
-      'Write tools return operation, changedFields, data, and dryRun. operation is created, updated, unchanged, or dry_run.',
+      'Use functree_resolve_stable_keys when you need a stableKey -> id mapping for many objects before creating alignments.',
+      'Use functree_project_summary after large syncs to confirm counts, latest scan, conflicts, and orphan references.',
+      'Use functree_query_path_context before updating code references for a file path to avoid duplicate near-identical references.',
+      'functree_query_context is read-only and supports keyword, types, view: "lite", includeSummaryOnly, includeMembers, stableKey, mapId/mapStableKey, alignmentId, parentFeatureId, entryPointId, codeReferenceId, path/pathMode, offset, and cursor filters.',
+      'Write tools return operation, changedFields, data, dryRun, and sometimes previewId. dryRun-created IDs are prefixed with preview_ and must not be reused as real IDs.',
       'Use dryRun: true before large syncs to preview diffs. Use batch tools for bulk maps, features, entry points, code references, or alignments.',
-      'Alignment upsert de-duplicates by id, stableKey, or member set, so repeated product/frontend/backend relationships should update instead of duplicating.',
+      'Alignment upsert de-duplicates by id, stableKey, or member set. Alignment members can use targetId or stableKey plus mapStableKey/version for features.',
+      'Use functree_begin_scan and functree_finish_scan to record repoKey, branch, commitSha, summary, and incremental scan state.',
       'stableKey should be a long-lived semantic key. id identifies a concrete FuncTree object instance.',
       'The create/upsert tools mutate the central FuncTree server and should normally require user approval.'
     ].join('\n')
@@ -196,7 +229,8 @@ server.registerTool(
       'Create or update a feature inside a FuncTree map. Upserts by id or stableKey+version and returns operation plus changedFields.',
     inputSchema: {
       ...featureItemShape,
-      mapId: z.string().describe('ID of the map that owns this feature.'),
+      projectId: z.string().optional().describe('Project ID. Required when using mapStableKey instead of mapId.'),
+      mapId: z.string().optional().describe('ID of the map that owns this feature. Required unless mapStableKey is provided.'),
       dryRun: dryRunSchema
     },
     annotations: {
@@ -298,9 +332,11 @@ server.registerTool(
   {
     title: 'Batch upsert features',
     description:
-      'Batch upsert features under one map. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+      'Batch upsert features under one or more maps. Supports item-level mapId/mapStableKey, dryRun, per-item operation, changedFields, and rollback on write failure.',
     inputSchema: {
-      mapId: z.string().describe('ID of the map that owns all features in this batch.'),
+      projectId: z.string().optional().describe('Project ID. Required when using mapStableKey at batch or item level.'),
+      mapId: z.string().optional().describe('Default map ID for items that do not specify mapId/mapStableKey.'),
+      mapStableKey: z.string().optional().describe('Default map stableKey for items that do not specify mapId/mapStableKey.'),
       dryRun: dryRunSchema,
       items: z.array(z.object(featureItemShape)).min(1).max(300).describe('Features to upsert.')
     },
@@ -390,13 +426,19 @@ server.registerTool(
         .optional()
         .describe('Optional keyword matched against names, descriptions, versions, stableKeys, IDs, paths, and symbols. Supports dot and hyphen fragments.'),
       types: z.array(z.enum(queryContextTypes)).min(1).max(6).optional().describe('Object types to return, for example ["feature"] or ["entry_point"].'),
+      view: z.enum(queryContextViews).optional().describe('Use "lite" to return compact id/stableKey/name/type/mapId/path rows instead of full objects.'),
+      includeSummaryOnly: z.boolean().optional().describe('When true, return only page totals and project summary without row arrays.'),
+      includeMembers: z.boolean().optional().describe('When false, alignment rows omit members to reduce response size. Defaults to true.'),
+      includeMetadata: z.boolean().optional().describe('When false in full view, omit metadata fields. Defaults to true.'),
       mapId: z.string().optional().describe('Filter maps, features, entry points, code references, or related alignments by map ID.'),
+      mapStableKey: z.string().optional().describe('Filter by map stableKey. Requires projectId.'),
       stableKey: z.string().optional().describe('Exact stableKey filter for maps, features, entry points, code references, or alignments.'),
       alignmentId: z.string().optional().describe('Filter alignments or alignment members by alignment ID.'),
       parentFeatureId: z.string().nullable().optional().describe('Filter features by parent feature ID. Use null for root features.'),
       entryPointId: z.string().optional().describe('Filter entry points, code references, features, or alignments by entry point ID.'),
       codeReferenceId: z.string().optional().describe('Filter code references, owning objects, or alignments by code reference ID.'),
       path: z.string().optional().describe('Filter entry points or code references by path fragment.'),
+      pathMode: z.enum(pathMatchModes).optional().describe('Path match mode: contains, exact, or prefix. Defaults to contains.'),
       limit: z
         .number()
         .int()
@@ -415,6 +457,117 @@ server.registerTool(
     }
   },
   async (args) => textResult(await callHttpTool(config, 'functree_query_context', args))
+);
+
+server.registerTool(
+  'functree_resolve_stable_keys',
+  {
+    title: 'Resolve FuncTree stable keys',
+    description:
+      'Resolve many stableKey references to concrete FuncTree IDs. Use this before writing alignments or code references when you only know stable keys.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID that owns all resolved objects.'),
+      items: z.array(resolveStableKeyItemSchema).min(1).max(500).describe('Objects to resolve.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_resolve_stable_keys', args))
+);
+
+server.registerTool(
+  'functree_project_summary',
+  {
+    title: 'Get FuncTree project summary',
+    description:
+      'Return lightweight project counts, latest scan run, stableKey conflicts, orphan code references, and path coverage. Use after large syncs.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID to summarize.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_project_summary', args))
+);
+
+server.registerTool(
+  'functree_query_path_context',
+  {
+    title: 'Query FuncTree path context',
+    description:
+      'Return entry points, code references, owning maps/features, and alignments for a file path. Use before incremental updates for a changed file.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      path: z.string().describe('Repository path or path fragment.'),
+      pathMode: z.enum(pathMatchModes).optional().describe('Path match mode: contains, exact, or prefix. Defaults to contains.'),
+      includeAlignments: z.boolean().optional().describe('Include alignments connected to matched objects. Defaults to true.'),
+      includeReferences: z.boolean().optional().describe('Include code references. Defaults to true.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_query_path_context', args))
+);
+
+server.registerTool(
+  'functree_begin_scan',
+  {
+    title: 'Begin FuncTree scan run',
+    description:
+      'Record the start of a repository scan with repoKey, branch, commitSha, baseCommitSha, and dirty state. Use the returned scanRunId on entry points and code references discovered by the scan.',
+    inputSchema: {
+      id: z.string().optional().describe('Optional scan run ID. If omitted, FuncTree generates one.'),
+      projectId: z.string().describe('Project ID.'),
+      repoKey: z.string().describe('Stable repository key, for example github:gavin7758521/functree or local monorepo package name.'),
+      repoUrl: z.string().optional().describe('Optional repository URL.'),
+      branch: z.string().optional().describe('Optional branch name.'),
+      commitSha: z.string().min(7).max(64).describe('Git commit SHA scanned.'),
+      baseCommitSha: z.string().min(7).max(64).optional().describe('Optional previous/base commit SHA for incremental scans.'),
+      worktreeDirty: z.boolean().optional().describe('Whether uncommitted changes were present during scanning.'),
+      metadata: metadataSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_begin_scan', args))
+);
+
+server.registerTool(
+  'functree_finish_scan',
+  {
+    title: 'Finish FuncTree scan run',
+    description:
+      'Complete a scan run with status and summary. Use after all entry points, code references, and alignments for the scan have been written.',
+    inputSchema: {
+      scanRunId: z.string().describe('Scan run ID returned by functree_begin_scan.'),
+      status: z.enum(scanRunStatuses).optional().describe('Final scan status. Defaults to completed.'),
+      summary: z.record(z.string(), z.unknown()).optional().describe('Counts or analysis summary from this scan.'),
+      metadata: metadataSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_finish_scan', args))
 );
 
 await server.connect(new StdioServerTransport());

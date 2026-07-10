@@ -1,5 +1,13 @@
 # 变更记录
 
+## Unreleased
+
+- `functree_query_context` 新增 `view: "lite"`、`includeSummaryOnly`、`includeMembers`、`includeMetadata`、`mapStableKey` 和 `pathMode`，降低大项目上下文体积。
+- 新增 `functree_resolve_stable_keys`、`functree_project_summary`、`functree_query_path_context`。
+- 新增 scan run 模型和 `functree_begin_scan` / `functree_finish_scan`，支持记录 Git commit 级扫描。
+- 功能、入口文件、代码引用和对齐关系支持用 stableKey 写入；feature batch 支持跨 Map item 级写入。
+- dry-run 新建对象 ID 改为 `preview_` 前缀，并返回 `previewId`。
+
 ## 0.3.0
 
 - 重构核心模型为 Project -> Map -> Feature。
