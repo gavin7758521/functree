@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:4174';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const QUERY_CONTEXT_MAX_LIMIT = 200;

@@ -1,6 +1,6 @@
 # 变更记录
 
-## Unreleased
+## 0.3.0
 
 - 重构核心模型为 Project -> Map -> Feature。
 - 删除旧分组概念和旧兼容入口。
