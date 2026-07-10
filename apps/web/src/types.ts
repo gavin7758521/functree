@@ -1,9 +1,13 @@
 export type Catalog = {
   labels: {
     projectStatus: Record<string, string>;
-    featureSetType: Record<string, string>;
-    featureSetStatus: Record<string, string>;
+    mapAxis: Record<string, string>;
+    mapScope: Record<string, string>;
+    mapKind: Record<string, string>;
+    mapStatus: Record<string, string>;
     featureStatus: Record<string, string>;
+    entryPointKind: Record<string, string>;
+    codeReferenceKind: Record<string, string>;
     alignmentRelation: Record<string, string>;
     alignmentStatus: Record<string, string>;
   };
@@ -18,15 +22,18 @@ export type Project = {
   updatedAt: string;
 };
 
-export type FeatureSet = {
+export type FuncMap = {
   id: string;
   projectId: string;
   stableKey: string;
   name: string;
   version: string;
-  type: string;
+  axis: string;
+  scope: string;
+  kind: string;
   status: string;
   owner: string;
+  tags: string[];
   description: string;
   features?: Feature[];
 };
@@ -34,15 +41,43 @@ export type FeatureSet = {
 export type Feature = {
   id: string;
   projectId: string;
-  featureSetId: string;
+  mapId: string;
   parentFeatureId: string | null;
   stableKey: string;
   name: string;
   version: string;
   status: string;
   kind: string;
+  tags: string[];
   description: string;
   children?: Feature[];
+};
+
+export type EntryPoint = {
+  id: string;
+  projectId: string;
+  mapId: string | null;
+  stableKey: string;
+  name: string;
+  path: string;
+  kind: string;
+  description: string;
+  confidence: number;
+};
+
+export type CodeReference = {
+  id: string;
+  projectId: string;
+  mapId: string | null;
+  featureId: string | null;
+  entryPointId: string | null;
+  stableKey: string;
+  path: string;
+  symbol: string;
+  kind: string;
+  description: string;
+  lineStart: number | null;
+  lineEnd: number | null;
 };
 
 export type Alignment = {
@@ -67,14 +102,18 @@ export type Overview = {
   projects: Project[];
   totals: {
     projects: number;
-    featureSets: number;
+    maps: number;
     features: number;
+    entryPoints: number;
+    codeReferences: number;
     alignments: number;
   };
 };
 
 export type ProjectTree = {
   project: Project;
-  featureSets: FeatureSet[];
+  maps: FuncMap[];
+  entryPoints: EntryPoint[];
+  codeReferences: CodeReference[];
   alignments: Alignment[];
 };

@@ -1,0 +1,9 @@
+{
+  "mapId": "map_web_chat",
+  "stableKey": "composer.send-message",
+  "name": "发送消息",
+  "version": "当前",
+  "status": "draft",
+  "kind": "capability",
+  "tags": ["composer", "message"]
+}

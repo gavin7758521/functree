@@ -1,0 +1,10 @@
+{
+  "projectId": "proj_chat",
+  "mapId": "map_web_chat",
+  "featureId": "feat_send_message",
+  "entryPointId": "ep_web_app_root",
+  "path": "apps/web/src/components/Composer.tsx",
+  "symbol": "Composer",
+  "kind": "component",
+  "description": "发送消息输入框组件。"
+}

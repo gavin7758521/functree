@@ -1,0 +1,9 @@
+{
+  "projectId": "proj_chat",
+  "mapId": "map_web_chat",
+  "stableKey": "web.chat-ui.app-root",
+  "name": "Web App 入口",
+  "path": "apps/web/src/main.tsx",
+  "kind": "app_root",
+  "confidence": 1
+}

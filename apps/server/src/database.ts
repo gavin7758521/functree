@@ -34,25 +34,29 @@ function migrate(db: Db): void {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS feature_sets (
+    CREATE TABLE IF NOT EXISTS maps (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      stable_key TEXT NOT NULL DEFAULT '',
+      stable_key TEXT NOT NULL,
       name TEXT NOT NULL,
       version TEXT NOT NULL,
-      type TEXT NOT NULL,
+      axis TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      kind TEXT NOT NULL,
       status TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       owner TEXT NOT NULL DEFAULT '',
+      tags_json TEXT NOT NULL DEFAULT '[]',
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, stable_key)
     );
 
     CREATE TABLE IF NOT EXISTS features (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      feature_set_id TEXT NOT NULL REFERENCES feature_sets(id) ON DELETE CASCADE,
+      map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
       parent_feature_id TEXT REFERENCES features(id) ON DELETE SET NULL,
       stable_key TEXT NOT NULL,
       name TEXT NOT NULL,
@@ -61,10 +65,45 @@ function migrate(db: Db): void {
       kind TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       sort_order INTEGER NOT NULL DEFAULT 0,
+      tags_json TEXT NOT NULL DEFAULT '[]',
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE(feature_set_id, stable_key, version)
+      UNIQUE(map_id, stable_key, version)
+    );
+
+    CREATE TABLE IF NOT EXISTS entry_points (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      map_id TEXT REFERENCES maps(id) ON DELETE SET NULL,
+      stable_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      confidence REAL NOT NULL DEFAULT 1,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, stable_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS code_references (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      map_id TEXT REFERENCES maps(id) ON DELETE SET NULL,
+      feature_id TEXT REFERENCES features(id) ON DELETE SET NULL,
+      entry_point_id TEXT REFERENCES entry_points(id) ON DELETE SET NULL,
+      stable_key TEXT NOT NULL DEFAULT '',
+      path TEXT NOT NULL,
+      symbol TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      line_start INTEGER,
+      line_end INTEGER,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS alignments (
@@ -99,37 +138,30 @@ function migrate(db: Db): void {
       created_at TEXT NOT NULL
     );
 
-    CREATE VIRTUAL TABLE IF NOT EXISTS features_fts USING fts5(
-      id UNINDEXED,
-      project_id UNINDEXED,
-      feature_set_id UNINDEXED,
-      name,
-      stable_key,
-      version,
-      description
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_feature_sets_project ON feature_sets(project_id);
+    CREATE INDEX IF NOT EXISTS idx_maps_project ON maps(project_id);
+    CREATE INDEX IF NOT EXISTS idx_maps_axis ON maps(axis);
     CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
-    CREATE INDEX IF NOT EXISTS idx_features_set ON features(feature_set_id);
+    CREATE INDEX IF NOT EXISTS idx_features_map ON features(map_id);
     CREATE INDEX IF NOT EXISTS idx_features_parent ON features(parent_feature_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_points_project ON entry_points(project_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_points_map ON entry_points(map_id);
+    CREATE INDEX IF NOT EXISTS idx_entry_points_path ON entry_points(path);
+    CREATE INDEX IF NOT EXISTS idx_code_references_project ON code_references(project_id);
+    CREATE INDEX IF NOT EXISTS idx_code_references_map ON code_references(map_id);
+    CREATE INDEX IF NOT EXISTS idx_code_references_feature ON code_references(feature_id);
+    CREATE INDEX IF NOT EXISTS idx_code_references_entry_point ON code_references(entry_point_id);
+    CREATE INDEX IF NOT EXISTS idx_code_references_path ON code_references(path);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_code_references_project_stable_key
+      ON code_references(project_id, stable_key)
+      WHERE stable_key <> '';
     CREATE INDEX IF NOT EXISTS idx_alignments_project ON alignments(project_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_alignments_project_stable_key
+      ON alignments(project_id, stable_key)
+      WHERE stable_key <> '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_alignments_project_member_signature
+      ON alignments(project_id, member_signature)
+      WHERE member_signature <> '';
     CREATE INDEX IF NOT EXISTS idx_alignment_members_alignment ON alignment_members(alignment_id);
     CREATE INDEX IF NOT EXISTS idx_alignment_members_target ON alignment_members(target_type, target_id);
   `);
-  ensureColumn(db, 'feature_sets', 'stable_key', "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(db, 'alignments', 'stable_key', "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(db, 'alignments', 'member_signature', "TEXT NOT NULL DEFAULT ''");
-  db.exec(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_sets_project_stable_key ON feature_sets(project_id, stable_key) WHERE stable_key <> '';
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_alignments_project_stable_key ON alignments(project_id, stable_key) WHERE stable_key <> '';
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_alignments_project_member_signature ON alignments(project_id, member_signature) WHERE member_signature <> '';
-  `);
-}
-
-function ensureColumn(db: Db, table: string, column: string, definition: string): void {
-  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (!rows.some((row) => row.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
 }

@@ -3,23 +3,31 @@ import {
   Braces,
   ChevronDown,
   ChevronRight,
+  Code2,
+  FileCode2,
   GitMerge,
   Layers3,
+  Link2,
+  Map as MapIcon,
   Network,
   Plus,
   RefreshCw,
   Search,
   Server
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import type { Alignment, Catalog, Feature, FeatureSet, Overview, Project, ProjectTree } from './types.js';
+import type { ReactNode } from 'react';
+import type { Alignment, Catalog, CodeReference, EntryPoint, Feature, FuncMap, Overview, Project, ProjectTree } from './types.js';
 
-type View = 'overview' | 'sets' | 'features' | 'alignments' | 'mcp';
+type View = 'overview' | 'maps' | 'features' | 'entryPoints' | 'references' | 'alignments' | 'mcp';
 
-const views: Array<{ id: View; label: string; icon: typeof Layers3 }> = [
+const views: Array<{ id: View; label: string; icon: LucideIcon }> = [
   { id: 'overview', label: '项目总览', icon: Layers3 },
-  { id: 'sets', label: '功能集', icon: Boxes },
+  { id: 'maps', label: '功能地图', icon: MapIcon },
   { id: 'features', label: '功能树', icon: Network },
+  { id: 'entryPoints', label: '入口文件', icon: FileCode2 },
+  { id: 'references', label: '代码引用', icon: Code2 },
   { id: 'alignments', label: '对齐关系', icon: GitMerge },
   { id: 'mcp', label: 'MCP 工具', icon: Braces }
 ];
@@ -31,11 +39,11 @@ const mcpToolGroups = [
   },
   {
     name: '写入',
-    tools: ['functree_create_project', 'functree_upsert_feature_set', 'functree_upsert_feature', 'functree_upsert_alignment']
+    tools: ['functree_create_project', 'functree_upsert_map', 'functree_upsert_feature', 'functree_upsert_entry_point', 'functree_upsert_code_reference', 'functree_upsert_alignment']
   },
   {
     name: '批量',
-    tools: ['functree_upsert_feature_sets_batch', 'functree_upsert_features_batch', 'functree_upsert_alignments_batch']
+    tools: ['functree_upsert_maps_batch', 'functree_upsert_features_batch', 'functree_upsert_entry_points_batch', 'functree_upsert_code_references_batch', 'functree_upsert_alignments_batch']
   }
 ];
 
@@ -46,8 +54,10 @@ export function App() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [tree, setTree] = useState<ProjectTree | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [selectedFeatureSetId, setSelectedFeatureSetId] = useState('');
+  const [selectedMapId, setSelectedMapId] = useState('');
   const [selectedFeatureId, setSelectedFeatureId] = useState('');
+  const [selectedEntryPointId, setSelectedEntryPointId] = useState('');
+  const [selectedCodeReferenceId, setSelectedCodeReferenceId] = useState('');
   const [selectedAlignmentId, setSelectedAlignmentId] = useState('');
   const [expandedFeatureIds, setExpandedFeatureIds] = useState<Set<string>>(() => new Set());
   const [view, setViewState] = useState<View>(() => readViewFromUrl());
@@ -85,31 +95,39 @@ export function App() {
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
-  const allFeatures = useMemo(() => tree?.featureSets.flatMap((set) => flattenFeatures(set.features ?? [])) ?? [], [tree]);
+  const allFeatures = useMemo(() => tree?.maps.flatMap((map) => flattenFeatures(map.features ?? [])) ?? [], [tree]);
   const filteredFeatures = useMemo(() => {
     if (!keyword.trim()) return allFeatures;
     const value = keyword.trim().toLowerCase();
-    return allFeatures.filter((feature) => `${feature.name} ${feature.stableKey} ${feature.description}`.toLowerCase().includes(value));
+    return allFeatures.filter((feature) => `${feature.name} ${feature.stableKey} ${feature.description} ${feature.tags?.join(' ')}`.toLowerCase().includes(value));
   }, [allFeatures, keyword]);
 
   useEffect(() => {
     if (!tree) {
-      setSelectedFeatureSetId('');
+      setSelectedMapId('');
       setSelectedFeatureId('');
+      setSelectedEntryPointId('');
+      setSelectedCodeReferenceId('');
       setSelectedAlignmentId('');
       return;
     }
 
-    if (!tree.featureSets.some((set) => set.id === selectedFeatureSetId)) {
-      setSelectedFeatureSetId(tree.featureSets[0]?.id ?? '');
+    if (!tree.maps.some((map) => map.id === selectedMapId)) {
+      setSelectedMapId(tree.maps[0]?.id ?? '');
     }
     if (!allFeatures.some((feature) => feature.id === selectedFeatureId)) {
       setSelectedFeatureId(allFeatures[0]?.id ?? '');
     }
+    if (!tree.entryPoints.some((entryPoint) => entryPoint.id === selectedEntryPointId)) {
+      setSelectedEntryPointId(tree.entryPoints[0]?.id ?? '');
+    }
+    if (!tree.codeReferences.some((reference) => reference.id === selectedCodeReferenceId)) {
+      setSelectedCodeReferenceId(tree.codeReferences[0]?.id ?? '');
+    }
     if (!tree.alignments.some((alignment) => alignment.id === selectedAlignmentId)) {
       setSelectedAlignmentId(tree.alignments[0]?.id ?? '');
     }
-  }, [allFeatures, selectedAlignmentId, selectedFeatureId, selectedFeatureSetId, tree]);
+  }, [allFeatures, selectedAlignmentId, selectedCodeReferenceId, selectedEntryPointId, selectedFeatureId, selectedMapId, tree]);
 
   const labels = catalog?.labels;
 
@@ -172,14 +190,14 @@ export function App() {
         ) : null}
 
         {tree && view === 'overview' && <OverviewView overview={overview} tree={tree} labels={labels} onSelectView={setView} />}
-        {tree && view === 'sets' && (
-          <FeatureSetView
+        {tree && view === 'maps' && (
+          <MapView
             tree={tree}
             labels={labels}
-            selectedFeatureSetId={selectedFeatureSetId}
-            onSelect={setSelectedFeatureSetId}
+            selectedMapId={selectedMapId}
+            onSelect={setSelectedMapId}
             onCreated={async () => {
-              setMessage('功能集已保存');
+              setMessage('功能地图已保存');
               await refresh(selectedProjectId);
             }}
           />
@@ -192,8 +210,10 @@ export function App() {
             setKeyword={setKeyword}
             filteredFeatures={filteredFeatures}
             selectedFeatureId={selectedFeatureId}
+            selectedMapId={selectedMapId}
             expandedFeatureIds={expandedFeatureIds}
-            onSelect={setSelectedFeatureId}
+            onSelectFeature={setSelectedFeatureId}
+            onSelectMap={setSelectedMapId}
             onToggle={(featureId) => {
               setExpandedFeatureIds((current) => {
                 const next = new Set(current);
@@ -204,6 +224,30 @@ export function App() {
             }}
             onCreated={async () => {
               setMessage('功能已保存');
+              await refresh(selectedProjectId);
+            }}
+          />
+        )}
+        {tree && view === 'entryPoints' && (
+          <EntryPointView
+            tree={tree}
+            labels={labels}
+            selectedEntryPointId={selectedEntryPointId}
+            onSelect={setSelectedEntryPointId}
+            onCreated={async () => {
+              setMessage('入口文件已保存');
+              await refresh(selectedProjectId);
+            }}
+          />
+        )}
+        {tree && view === 'references' && (
+          <CodeReferenceView
+            tree={tree}
+            labels={labels}
+            selectedCodeReferenceId={selectedCodeReferenceId}
+            onSelect={setSelectedCodeReferenceId}
+            onCreated={async () => {
+              setMessage('代码引用已保存');
               await refresh(selectedProjectId);
             }}
           />
@@ -237,13 +281,16 @@ function OverviewView({
   labels: Catalog['labels'] | undefined;
   onSelectView: (view: View) => void;
 }) {
+  const featureCount = tree.maps.reduce((count, map) => count + flattenFeatures(map.features ?? []).length, 0);
   return (
     <section className="content">
       <div className="metrics">
         <Metric label="项目" value={overview?.totals.projects ?? 0} />
-        <Metric label="功能集" value={overview?.totals.featureSets ?? 0} />
+        <Metric label="地图" value={overview?.totals.maps ?? 0} />
         <Metric label="功能" value={overview?.totals.features ?? 0} />
-        <Metric label="对齐关系" value={overview?.totals.alignments ?? 0} />
+        <Metric label="入口" value={overview?.totals.entryPoints ?? 0} />
+        <Metric label="引用" value={overview?.totals.codeReferences ?? 0} />
+        <Metric label="对齐" value={overview?.totals.alignments ?? 0} />
       </div>
       <div className="overviewGrid">
         <section className="panel">
@@ -256,7 +303,8 @@ function OverviewView({
             items={[
               ['项目 ID', tree.project.id],
               ['当前版本', tree.project.currentVersion],
-              ['功能集', String(tree.featureSets.length)],
+              ['功能地图', String(tree.maps.length)],
+              ['功能', String(featureCount)],
               ['对齐关系', String(tree.alignments.length)]
             ]}
           />
@@ -266,15 +314,20 @@ function OverviewView({
             <h2>入口</h2>
           </div>
           <div className="actionList">
-            <button type="button" onClick={() => onSelectView('sets')}>
-              <Boxes size={16} />
-              <span>功能集</span>
-              <small>{tree.featureSets.length}</small>
+            <button type="button" onClick={() => onSelectView('maps')}>
+              <MapIcon size={16} />
+              <span>功能地图</span>
+              <small>{tree.maps.length}</small>
             </button>
-            <button type="button" onClick={() => onSelectView('features')}>
-              <Network size={16} />
-              <span>功能树</span>
-              <small>{tree.featureSets.reduce((count, set) => count + flattenFeatures(set.features ?? []).length, 0)}</small>
+            <button type="button" onClick={() => onSelectView('entryPoints')}>
+              <FileCode2 size={16} />
+              <span>入口文件</span>
+              <small>{tree.entryPoints.length}</small>
+            </button>
+            <button type="button" onClick={() => onSelectView('references')}>
+              <Code2 size={16} />
+              <span>代码引用</span>
+              <small>{tree.codeReferences.length}</small>
             </button>
             <button type="button" onClick={() => onSelectView('alignments')}>
               <GitMerge size={16} />
@@ -286,40 +339,40 @@ function OverviewView({
       </div>
       <section className="panel">
         <div className="sectionHeader">
-          <h2>功能集概览</h2>
+          <h2>功能地图概览</h2>
         </div>
-        <FeatureSetRows featureSets={tree.featureSets} labels={labels} />
+        <MapRows maps={tree.maps} labels={labels} />
       </section>
     </section>
   );
 }
 
-function FeatureSetView({
+function MapView({
   tree,
   labels,
-  selectedFeatureSetId,
+  selectedMapId,
   onSelect,
   onCreated
 }: {
   tree: ProjectTree;
   labels: Catalog['labels'] | undefined;
-  selectedFeatureSetId: string;
-  onSelect: (featureSetId: string) => void;
+  selectedMapId: string;
+  onSelect: (mapId: string) => void;
   onCreated: () => Promise<void>;
 }) {
-  const selected = tree.featureSets.find((set) => set.id === selectedFeatureSetId) ?? tree.featureSets[0];
+  const selected = tree.maps.find((map) => map.id === selectedMapId) ?? tree.maps[0];
   return (
     <section className="content workbench">
       <div className="workMain">
         <div className="sectionHeader">
-          <h2>功能集</h2>
-          <span>{tree.featureSets.length} 个</span>
+          <h2>功能地图</h2>
+          <span>{tree.maps.length} 个</span>
         </div>
-        <FeatureSetRows featureSets={tree.featureSets} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
+        <MapRows maps={tree.maps} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
       </div>
       <aside className="workSide">
-        <FeatureSetDetail featureSet={selected} labels={labels} />
-        <FeatureSetCreator projectId={tree.project.id} onCreated={onCreated} />
+        <MapDetail tree={tree} map={selected} labels={labels} />
+        <MapCreator projectId={tree.project.id} onCreated={onCreated} />
       </aside>
     </section>
   );
@@ -332,8 +385,10 @@ function FeatureTreeView({
   setKeyword,
   filteredFeatures,
   selectedFeatureId,
+  selectedMapId,
   expandedFeatureIds,
-  onSelect,
+  onSelectFeature,
+  onSelectMap,
   onToggle,
   onCreated
 }: {
@@ -343,12 +398,14 @@ function FeatureTreeView({
   setKeyword: (value: string) => void;
   filteredFeatures: Feature[];
   selectedFeatureId: string;
+  selectedMapId: string;
   expandedFeatureIds: Set<string>;
-  onSelect: (featureId: string) => void;
+  onSelectFeature: (featureId: string) => void;
+  onSelectMap: (mapId: string) => void;
   onToggle: (featureId: string) => void;
   onCreated: () => Promise<void>;
 }) {
-  const selected = tree.featureSets.flatMap((set) => flattenFeatures(set.features ?? [])).find((feature) => feature.id === selectedFeatureId);
+  const selected = tree.maps.flatMap((map) => flattenFeatures(map.features ?? [])).find((feature) => feature.id === selectedFeatureId);
   const alignments = selected ? tree.alignments.filter((alignment) => alignment.members.some((member) => member.targetType === 'feature' && member.targetId === selected.id)) : [];
   return (
     <section className="content workbench">
@@ -363,40 +420,752 @@ function FeatureTreeView({
         {keyword ? (
           <div className="listPanel">
             {filteredFeatures.map((feature) => (
-              <FeatureResultRow key={feature.id} feature={feature} labels={labels} selected={feature.id === selectedFeatureId} onSelect={onSelect} />
+              <FeatureResultRow key={feature.id} feature={feature} labels={labels} selected={feature.id === selectedFeatureId} onSelect={onSelectFeature} />
             ))}
             {filteredFeatures.length === 0 ? <EmptyState title="没有匹配功能" /> : null}
           </div>
         ) : (
-          <div className="featureSets">
-            {tree.featureSets.map((set) => (
-              <section className="featureSetBlock" key={set.id}>
-                <h3>
-                  {set.name}
-                  <span>{set.version}</span>
-                </h3>
-                {(set.features ?? []).map((feature) => (
+          <div className="mapBlocks">
+            {tree.maps.map((map) => (
+              <section className="mapBlock" key={map.id}>
+                <button type="button" className={map.id === selectedMapId ? 'mapBlockHeader active' : 'mapBlockHeader'} onClick={() => onSelectMap(map.id)}>
+                  <strong>{map.name}</strong>
+                  <span>{labels?.mapAxis[map.axis] ?? map.axis}</span>
+                  <small>{map.stableKey}</small>
+                </button>
+                {(map.features ?? []).map((feature) => (
                   <FeatureNode
                     key={feature.id}
                     feature={feature}
                     labels={labels}
                     selectedFeatureId={selectedFeatureId}
                     expandedFeatureIds={expandedFeatureIds}
-                    onSelect={onSelect}
+                    onSelect={onSelectFeature}
                     onToggle={onToggle}
                   />
                 ))}
-                {(set.features ?? []).length === 0 ? <p className="emptyInline">暂无功能</p> : null}
+                {(map.features ?? []).length === 0 ? <p className="emptyInline">暂无功能</p> : null}
               </section>
             ))}
           </div>
         )}
       </div>
       <aside className="workSide">
-        <FeatureDetail feature={selected} labels={labels} alignments={alignments} />
-        <FeatureCreator tree={tree} onCreated={onCreated} />
+        <FeatureDetail tree={tree} feature={selected} labels={labels} alignments={alignments} />
+        <FeatureCreator tree={tree} selectedMapId={selectedMapId} onCreated={onCreated} />
       </aside>
     </section>
+  );
+}
+
+function EntryPointView({
+  tree,
+  labels,
+  selectedEntryPointId,
+  onSelect,
+  onCreated
+}: {
+  tree: ProjectTree;
+  labels: Catalog['labels'] | undefined;
+  selectedEntryPointId: string;
+  onSelect: (entryPointId: string) => void;
+  onCreated: () => Promise<void>;
+}) {
+  const selected = tree.entryPoints.find((entryPoint) => entryPoint.id === selectedEntryPointId) ?? tree.entryPoints[0];
+  return (
+    <section className="content workbench">
+      <div className="workMain">
+        <div className="sectionHeader">
+          <h2>入口文件</h2>
+          <span>{tree.entryPoints.length} 个</span>
+        </div>
+        <EntryPointRows entryPoints={tree.entryPoints} tree={tree} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
+      </div>
+      <aside className="workSide">
+        <EntryPointDetail entryPoint={selected} tree={tree} labels={labels} />
+        <EntryPointCreator tree={tree} onCreated={onCreated} />
+      </aside>
+    </section>
+  );
+}
+
+function CodeReferenceView({
+  tree,
+  labels,
+  selectedCodeReferenceId,
+  onSelect,
+  onCreated
+}: {
+  tree: ProjectTree;
+  labels: Catalog['labels'] | undefined;
+  selectedCodeReferenceId: string;
+  onSelect: (codeReferenceId: string) => void;
+  onCreated: () => Promise<void>;
+}) {
+  const selected = tree.codeReferences.find((reference) => reference.id === selectedCodeReferenceId) ?? tree.codeReferences[0];
+  return (
+    <section className="content workbench">
+      <div className="workMain">
+        <div className="sectionHeader">
+          <h2>代码引用</h2>
+          <span>{tree.codeReferences.length} 个</span>
+        </div>
+        <CodeReferenceRows references={tree.codeReferences} tree={tree} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
+      </div>
+      <aside className="workSide">
+        <CodeReferenceDetail reference={selected} tree={tree} labels={labels} />
+        <CodeReferenceCreator tree={tree} onCreated={onCreated} />
+      </aside>
+    </section>
+  );
+}
+
+function AlignmentView({
+  tree,
+  labels,
+  selectedAlignmentId,
+  onSelect,
+  onCreated
+}: {
+  tree: ProjectTree;
+  labels: Catalog['labels'] | undefined;
+  selectedAlignmentId: string;
+  onSelect: (alignmentId: string) => void;
+  onCreated: () => Promise<void>;
+}) {
+  const selected = tree.alignments.find((alignment) => alignment.id === selectedAlignmentId) ?? tree.alignments[0];
+  return (
+    <section className="content workbench">
+      <div className="workMain">
+        <div className="sectionHeader">
+          <h2>对齐关系</h2>
+          <span>{tree.alignments.length} 条</span>
+        </div>
+        <div className="alignmentList">
+          {tree.alignments.map((alignment) => (
+            <button key={alignment.id} type="button" className={alignment.id === selected?.id ? 'alignment active' : 'alignment'} onClick={() => onSelect(alignment.id)}>
+              <header>
+                <strong>{alignment.name}</strong>
+                <span>{labels?.alignmentRelation[alignment.relation] ?? alignment.relation}</span>
+                <em>{labels?.alignmentStatus[alignment.status] ?? alignment.status}</em>
+              </header>
+              <Description value={alignment.description} empty="暂无说明" />
+              <div className="members">
+                {alignment.members.map((member) => (
+                  <span key={member.id}>
+                    {targetTypeLabel(member.targetType)}：{member.label ?? member.targetId}
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+          {tree.alignments.length === 0 ? <EmptyState title="暂无对齐关系" /> : null}
+        </div>
+      </div>
+      <aside className="workSide">
+        <AlignmentDetail alignment={selected} labels={labels} />
+        <AlignmentCreator tree={tree} onCreated={onCreated} />
+      </aside>
+    </section>
+  );
+}
+
+function McpView() {
+  return (
+    <section className="content">
+      <div className="sectionHeader">
+        <h2>MCP 工具入口</h2>
+      </div>
+      <div className="mcpGrid">
+        {mcpToolGroups.map((group) => (
+          <section className="mcpGroup" key={group.name}>
+            <h3>{group.name}</h3>
+            {group.tools.map((tool) => (
+              <article key={tool}>
+                <Server size={18} />
+                <strong>{tool}</strong>
+              </article>
+            ))}
+          </section>
+        ))}
+      </div>
+      <pre>{`# 中央服务端
+pnpm start
+
+# 其它服务器上的 MCP 适配器
+npm install -g @gavin7758521/functree-mcp
+FUNCTREE_SERVER_URL=http://192.168.124.82:4174 functree-mcp
+
+# 调试 HTTP 工具
+POST /api/mcp/call
+{
+  "name": "functree_query_context",
+  "arguments": { "projectId": "proj_your_app", "types": ["map", "entry_point"], "keyword": "backend.bots", "limit": 100 }
+}`}</pre>
+    </section>
+  );
+}
+
+function MapRows({
+  maps,
+  labels,
+  selectedId,
+  onSelect
+}: {
+  maps: FuncMap[];
+  labels: Catalog['labels'] | undefined;
+  selectedId?: string;
+  onSelect?: (mapId: string) => void;
+}) {
+  return (
+    <div className="table mapTable">
+      {maps.map((map) => {
+        const content = (
+          <>
+            <strong>{map.name}</strong>
+            <span>{labels?.mapAxis[map.axis] ?? map.axis}</span>
+            <span>{labels?.mapScope[map.scope] ?? map.scope}</span>
+            <em>{labels?.mapStatus[map.status] ?? map.status}</em>
+            <small>{map.stableKey}</small>
+          </>
+        );
+        return onSelect ? (
+          <button type="button" className={map.id === selectedId ? 'row active' : 'row'} key={map.id} onClick={() => onSelect(map.id)}>
+            {content}
+          </button>
+        ) : (
+          <div className="row" key={map.id}>
+            {content}
+          </div>
+        );
+      })}
+      {maps.length === 0 ? <EmptyState title="暂无功能地图" /> : null}
+    </div>
+  );
+}
+
+function EntryPointRows({
+  entryPoints,
+  tree,
+  labels,
+  selectedId,
+  onSelect
+}: {
+  entryPoints: EntryPoint[];
+  tree: ProjectTree;
+  labels: Catalog['labels'] | undefined;
+  selectedId?: string;
+  onSelect: (entryPointId: string) => void;
+}) {
+  return (
+    <div className="table entryTable">
+      {entryPoints.map((entryPoint) => (
+        <button type="button" className={entryPoint.id === selectedId ? 'row active' : 'row'} key={entryPoint.id} onClick={() => onSelect(entryPoint.id)}>
+          <strong>{entryPoint.name}</strong>
+          <span>{labels?.entryPointKind[entryPoint.kind] ?? entryPoint.kind}</span>
+          <span>{mapName(tree, entryPoint.mapId)}</span>
+          <small>{entryPoint.path}</small>
+          <code>{entryPoint.stableKey}</code>
+        </button>
+      ))}
+      {entryPoints.length === 0 ? <EmptyState title="暂无入口文件" /> : null}
+    </div>
+  );
+}
+
+function CodeReferenceRows({
+  references,
+  tree,
+  labels,
+  selectedId,
+  onSelect
+}: {
+  references: CodeReference[];
+  tree: ProjectTree;
+  labels: Catalog['labels'] | undefined;
+  selectedId?: string;
+  onSelect: (codeReferenceId: string) => void;
+}) {
+  return (
+    <div className="table referenceTable">
+      {references.map((reference) => (
+        <button type="button" className={reference.id === selectedId ? 'row active' : 'row'} key={reference.id} onClick={() => onSelect(reference.id)}>
+          <strong>{reference.symbol || reference.path}</strong>
+          <span>{labels?.codeReferenceKind[reference.kind] ?? reference.kind}</span>
+          <span>{mapName(tree, reference.mapId)}</span>
+          <small>{reference.path}</small>
+          <code>{reference.stableKey || reference.id}</code>
+        </button>
+      ))}
+      {references.length === 0 ? <EmptyState title="暂无代码引用" /> : null}
+    </div>
+  );
+}
+
+function MapDetail({ tree, map, labels }: { tree: ProjectTree; map: FuncMap | undefined; labels: Catalog['labels'] | undefined }) {
+  if (!map) return <EmptyState title="未选择功能地图" />;
+  const featureCount = flattenFeatures(map.features ?? []).length;
+  const entryCount = tree.entryPoints.filter((entryPoint) => entryPoint.mapId === map.id).length;
+  const referenceCount = tree.codeReferences.filter((reference) => reference.mapId === map.id).length;
+  return (
+    <section className="panel">
+      <div className="sectionHeader">
+        <h2>{map.name}</h2>
+        <span>{labels?.mapAxis[map.axis] ?? map.axis}</span>
+      </div>
+      <Description value={map.description} empty="暂无功能地图说明" />
+      <InfoGrid
+        items={[
+          ['ID', map.id],
+          ['稳定键', map.stableKey],
+          ['版本', map.version],
+          ['范围', labels?.mapScope[map.scope] ?? map.scope],
+          ['类型', labels?.mapKind[map.kind] ?? map.kind],
+          ['状态', labels?.mapStatus[map.status] ?? map.status],
+          ['负责人', map.owner || '未设置'],
+          ['功能', String(featureCount)],
+          ['入口', String(entryCount)],
+          ['引用', String(referenceCount)]
+        ]}
+      />
+      <TagList values={map.tags} />
+    </section>
+  );
+}
+
+function FeatureDetail({
+  tree,
+  feature,
+  labels,
+  alignments
+}: {
+  tree: ProjectTree;
+  feature: Feature | undefined;
+  labels: Catalog['labels'] | undefined;
+  alignments: Alignment[];
+}) {
+  if (!feature) return <EmptyState title="未选择功能" />;
+  return (
+    <section className="panel">
+      <div className="sectionHeader">
+        <h2>{feature.name}</h2>
+        <span>{labels?.featureStatus[feature.status] ?? feature.status}</span>
+      </div>
+      <Description value={feature.description} empty="暂无功能说明" />
+      <InfoGrid
+        items={[
+          ['ID', feature.id],
+          ['功能地图', mapName(tree, feature.mapId)],
+          ['稳定键', feature.stableKey],
+          ['版本', feature.version],
+          ['类型', feature.kind],
+          ['父功能', feature.parentFeatureId ?? '无'],
+          ['子功能', String(feature.children?.length ?? 0)]
+        ]}
+      />
+      <TagList values={feature.tags} />
+      <div className="detailBlock">
+        <h3>相关对齐</h3>
+        {alignments.map((alignment) => (
+          <span key={alignment.id}>{alignment.name}</span>
+        ))}
+        {alignments.length === 0 ? <small>暂无</small> : null}
+      </div>
+    </section>
+  );
+}
+
+function EntryPointDetail({ entryPoint, tree, labels }: { entryPoint: EntryPoint | undefined; tree: ProjectTree; labels: Catalog['labels'] | undefined }) {
+  if (!entryPoint) return <EmptyState title="未选择入口文件" />;
+  return (
+    <section className="panel">
+      <div className="sectionHeader">
+        <h2>{entryPoint.name}</h2>
+        <span>{labels?.entryPointKind[entryPoint.kind] ?? entryPoint.kind}</span>
+      </div>
+      <Description value={entryPoint.description} empty="暂无入口说明" />
+      <InfoGrid
+        items={[
+          ['ID', entryPoint.id],
+          ['功能地图', mapName(tree, entryPoint.mapId)],
+          ['稳定键', entryPoint.stableKey],
+          ['路径', entryPoint.path],
+          ['置信度', entryPoint.confidence.toFixed(2)]
+        ]}
+      />
+    </section>
+  );
+}
+
+function CodeReferenceDetail({ reference, tree, labels }: { reference: CodeReference | undefined; tree: ProjectTree; labels: Catalog['labels'] | undefined }) {
+  if (!reference) return <EmptyState title="未选择代码引用" />;
+  return (
+    <section className="panel">
+      <div className="sectionHeader">
+        <h2>{reference.symbol || reference.path}</h2>
+        <span>{labels?.codeReferenceKind[reference.kind] ?? reference.kind}</span>
+      </div>
+      <Description value={reference.description} empty="暂无引用说明" />
+      <InfoGrid
+        items={[
+          ['ID', reference.id],
+          ['功能地图', mapName(tree, reference.mapId)],
+          ['功能', featureName(tree, reference.featureId)],
+          ['入口文件', entryPointName(tree, reference.entryPointId)],
+          ['稳定键', reference.stableKey || '未设置'],
+          ['路径', reference.path],
+          ['符号', reference.symbol || '无'],
+          ['行号', lineRange(reference)]
+        ]}
+      />
+    </section>
+  );
+}
+
+function AlignmentDetail({ alignment, labels }: { alignment: Alignment | undefined; labels: Catalog['labels'] | undefined }) {
+  if (!alignment) return <EmptyState title="未选择对齐关系" />;
+  return (
+    <section className="panel">
+      <div className="sectionHeader">
+        <h2>{alignment.name}</h2>
+        <span>{labels?.alignmentStatus[alignment.status] ?? alignment.status}</span>
+      </div>
+      <Description value={alignment.description} empty="暂无对齐说明" />
+      <InfoGrid
+        items={[
+          ['ID', alignment.id],
+          ['稳定键', alignment.stableKey || '未设置'],
+          ['关系', labels?.alignmentRelation[alignment.relation] ?? alignment.relation],
+          ['成员数量', String(alignment.members.length)]
+        ]}
+      />
+      <div className="detailBlock">
+        <h3>成员</h3>
+        {alignment.members.map((member) => (
+          <span key={member.id}>
+            {targetTypeLabel(member.targetType)} / {member.role} / {member.label ?? member.targetId}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ProjectCreator({ onCreated, compact = false }: { onCreated: (project: Project) => Promise<void>; compact?: boolean }) {
+  const [name, setName] = useState('');
+  return (
+    <form
+      className={compact ? 'quickForm compact' : 'quickForm'}
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!name.trim()) return;
+        const project = await postJson<Project>('/api/projects', { name, currentVersion: '当前', status: 'active' });
+        setName('');
+        await onCreated(project);
+      }}
+    >
+      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="新建项目" />
+      <button type="submit" aria-label="新建项目">
+        <Plus size={16} />
+      </button>
+    </form>
+  );
+}
+
+function MapCreator({ projectId, onCreated }: { projectId: string; onCreated: () => Promise<void> }) {
+  const [name, setName] = useState('');
+  const [stableKey, setStableKey] = useState('');
+  const [axis, setAxis] = useState('web');
+  const [scope, setScope] = useState('implementation');
+  const [kind, setKind] = useState('app');
+  const [version, setVersion] = useState('当前');
+  return (
+    <form
+      className="editorPanel"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!projectId || !stableKey.trim()) return;
+        await postJson(`/api/projects/${projectId}/maps`, { name, stableKey, axis, scope, kind, version, status: 'normal' });
+        setName('');
+        setStableKey('');
+        await onCreated();
+      }}
+    >
+      <h3>新建功能地图</h3>
+      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="名称，例如 Web 聊天界面" required />
+      <input value={stableKey} onChange={(event) => setStableKey(event.target.value)} placeholder="稳定键，例如 web.chat-ui" required />
+      <input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="版本" required />
+      <div className="formGrid">
+        <select value={axis} onChange={(event) => setAxis(event.target.value)}>
+          <option value="product">产品</option>
+          <option value="web">前端</option>
+          <option value="backend">后端</option>
+          <option value="sdk">SDK</option>
+          <option value="ops">运维</option>
+          <option value="data">数据</option>
+          <option value="test">测试</option>
+          <option value="docs">文档</option>
+        </select>
+        <select value={scope} onChange={(event) => setScope(event.target.value)}>
+          <option value="capability">能力</option>
+          <option value="implementation">实现</option>
+          <option value="contract">契约</option>
+          <option value="operation">运维</option>
+          <option value="validation">验证</option>
+          <option value="documentation">文档</option>
+        </select>
+        <select value={kind} onChange={(event) => setKind(event.target.value)}>
+          <option value="domain">领域</option>
+          <option value="app">应用</option>
+          <option value="service">服务</option>
+          <option value="package">包</option>
+          <option value="module">模块</option>
+          <option value="api">API</option>
+          <option value="database">数据库</option>
+          <option value="deployment">部署</option>
+          <option value="test_suite">测试集</option>
+        </select>
+      </div>
+      <button type="submit">
+        <Plus size={16} />
+        <span>保存地图</span>
+      </button>
+    </form>
+  );
+}
+
+function FeatureCreator({ tree, selectedMapId, onCreated }: { tree: ProjectTree; selectedMapId: string; onCreated: () => Promise<void> }) {
+  const [mapId, setMapId] = useState('');
+  const [parentFeatureId, setParentFeatureId] = useState('');
+  const [name, setName] = useState('');
+  const [stableKey, setStableKey] = useState('');
+  const [version, setVersion] = useState('当前');
+  const targetMapId = mapId || selectedMapId || tree.maps[0]?.id || '';
+  const parentOptions = flattenFeatures(tree.maps.find((map) => map.id === targetMapId)?.features ?? []);
+  return (
+    <form
+      className="editorPanel"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!targetMapId) return;
+        await postJson(`/api/maps/${targetMapId}/features`, {
+          name,
+          stableKey,
+          version,
+          parentFeatureId: parentFeatureId || null,
+          status: 'draft',
+          kind: 'capability'
+        });
+        setName('');
+        setStableKey('');
+        setParentFeatureId('');
+        await onCreated();
+      }}
+    >
+      <h3>新建功能</h3>
+      <select value={targetMapId} onChange={(event) => setMapId(event.target.value)} disabled={tree.maps.length === 0}>
+        {tree.maps.map((map) => (
+          <option key={map.id} value={map.id}>
+            {map.name} / {map.stableKey}
+          </option>
+        ))}
+      </select>
+      <select value={parentFeatureId} onChange={(event) => setParentFeatureId(event.target.value)}>
+        <option value="">无父功能</option>
+        {parentOptions.map((feature) => (
+          <option key={feature.id} value={feature.id}>
+            {feature.name} / {feature.stableKey}
+          </option>
+        ))}
+      </select>
+      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="功能名称" required />
+      <input value={stableKey} onChange={(event) => setStableKey(event.target.value)} placeholder="稳定键，例如 send-message" required />
+      <input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="功能版本" required />
+      <button type="submit" disabled={!targetMapId}>
+        <Plus size={16} />
+        <span>保存功能</span>
+      </button>
+    </form>
+  );
+}
+
+function EntryPointCreator({ tree, onCreated }: { tree: ProjectTree; onCreated: () => Promise<void> }) {
+  const [mapId, setMapId] = useState('');
+  const [name, setName] = useState('');
+  const [stableKey, setStableKey] = useState('');
+  const [path, setPath] = useState('');
+  const [kind, setKind] = useState('app_root');
+  return (
+    <form
+      className="editorPanel"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        await postJson(`/api/projects/${tree.project.id}/entry-points`, {
+          mapId: mapId || undefined,
+          name,
+          stableKey,
+          path,
+          kind,
+          confidence: 1
+        });
+        setName('');
+        setStableKey('');
+        setPath('');
+        await onCreated();
+      }}
+    >
+      <h3>新建入口文件</h3>
+      <select value={mapId} onChange={(event) => setMapId(event.target.value)}>
+        <option value="">不绑定地图</option>
+        {tree.maps.map((map) => (
+          <option key={map.id} value={map.id}>
+            {map.name} / {map.stableKey}
+          </option>
+        ))}
+      </select>
+      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="名称，例如 App 入口" required />
+      <input value={stableKey} onChange={(event) => setStableKey(event.target.value)} placeholder="稳定键，例如 web.app-root" required />
+      <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="路径，例如 src/main.tsx" required />
+      <select value={kind} onChange={(event) => setKind(event.target.value)}>
+        <option value="app_root">应用入口</option>
+        <option value="router">路由入口</option>
+        <option value="server_bootstrap">服务启动</option>
+        <option value="http_api_root">HTTP API 入口</option>
+        <option value="cli">CLI</option>
+        <option value="config">配置</option>
+        <option value="schema">Schema</option>
+        <option value="deployment">部署</option>
+        <option value="test">测试</option>
+      </select>
+      <button type="submit">
+        <Plus size={16} />
+        <span>保存入口</span>
+      </button>
+    </form>
+  );
+}
+
+function CodeReferenceCreator({ tree, onCreated }: { tree: ProjectTree; onCreated: () => Promise<void> }) {
+  const [mapId, setMapId] = useState('');
+  const [featureId, setFeatureId] = useState('');
+  const [entryPointId, setEntryPointId] = useState('');
+  const [path, setPath] = useState('');
+  const [symbol, setSymbol] = useState('');
+  const [kind, setKind] = useState('function');
+  const selectedMapId = mapId || tree.maps[0]?.id || '';
+  const featureOptions = selectedMapId ? flattenFeatures(tree.maps.find((map) => map.id === selectedMapId)?.features ?? []) : [];
+  const entryOptions = selectedMapId ? tree.entryPoints.filter((entryPoint) => !entryPoint.mapId || entryPoint.mapId === selectedMapId) : tree.entryPoints;
+  return (
+    <form
+      className="editorPanel"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        await postJson(`/api/projects/${tree.project.id}/code-references`, {
+          mapId: selectedMapId || undefined,
+          featureId: featureId || undefined,
+          entryPointId: entryPointId || undefined,
+          path,
+          symbol: symbol || undefined,
+          kind
+        });
+        setFeatureId('');
+        setEntryPointId('');
+        setPath('');
+        setSymbol('');
+        await onCreated();
+      }}
+    >
+      <h3>新建代码引用</h3>
+      <select value={selectedMapId} onChange={(event) => setMapId(event.target.value)} disabled={tree.maps.length === 0}>
+        {tree.maps.map((map) => (
+          <option key={map.id} value={map.id}>
+            {map.name} / {map.stableKey}
+          </option>
+        ))}
+      </select>
+      <select value={featureId} onChange={(event) => setFeatureId(event.target.value)}>
+        <option value="">不绑定功能</option>
+        {featureOptions.map((feature) => (
+          <option key={feature.id} value={feature.id}>
+            {feature.name} / {feature.stableKey}
+          </option>
+        ))}
+      </select>
+      <select value={entryPointId} onChange={(event) => setEntryPointId(event.target.value)}>
+        <option value="">不绑定入口</option>
+        {entryOptions.map((entryPoint) => (
+          <option key={entryPoint.id} value={entryPoint.id}>
+            {entryPoint.name} / {entryPoint.path}
+          </option>
+        ))}
+      </select>
+      <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="路径，例如 src/App.tsx" required />
+      <input value={symbol} onChange={(event) => setSymbol(event.target.value)} placeholder="符号，例如 Composer" />
+      <select value={kind} onChange={(event) => setKind(event.target.value)}>
+        <option value="file">文件</option>
+        <option value="function">函数</option>
+        <option value="component">组件</option>
+        <option value="api">API</option>
+        <option value="route">路由</option>
+        <option value="table">表</option>
+        <option value="migration">迁移</option>
+        <option value="config">配置</option>
+        <option value="test">测试</option>
+      </select>
+      <button type="submit" disabled={!selectedMapId}>
+        <Plus size={16} />
+        <span>保存引用</span>
+      </button>
+    </form>
+  );
+}
+
+function AlignmentCreator({ tree, onCreated }: { tree: ProjectTree; onCreated: () => Promise<void> }) {
+  const alignables = buildAlignables(tree);
+  const [first, setFirst] = useState('');
+  const [second, setSecond] = useState('');
+  const a = first || alignables[0]?.value || '';
+  const b = second || alignables[1]?.value || '';
+  return (
+    <form
+      className="editorPanel"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const firstItem = alignables.find((item) => item.value === a);
+        const secondItem = alignables.find((item) => item.value === b);
+        if (!firstItem || !secondItem || firstItem.value === secondItem.value) return;
+        await postJson(`/api/projects/${tree.project.id}/alignments`, {
+          name: `${firstItem.label} 对齐 ${secondItem.label}`,
+          relation: 'corresponds_to',
+          status: 'proposed',
+          members: [
+            { targetType: firstItem.type, targetId: firstItem.id, role: 'source' },
+            { targetType: secondItem.type, targetId: secondItem.id, role: 'target' }
+          ]
+        });
+        await onCreated();
+      }}
+    >
+      <h3>建立对齐</h3>
+      <select value={a} onChange={(event) => setFirst(event.target.value)}>
+        {alignables.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <select value={b} onChange={(event) => setSecond(event.target.value)}>
+        {alignables.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      <button type="submit" disabled={alignables.length < 2 || a === b}>
+        <Link2 size={16} />
+        <span>保存对齐</span>
+      </button>
+    </form>
   );
 }
 
@@ -490,366 +1259,6 @@ function FeatureResultRow({
   );
 }
 
-function AlignmentView({
-  tree,
-  labels,
-  selectedAlignmentId,
-  onSelect,
-  onCreated
-}: {
-  tree: ProjectTree;
-  labels: Catalog['labels'] | undefined;
-  selectedAlignmentId: string;
-  onSelect: (alignmentId: string) => void;
-  onCreated: () => Promise<void>;
-}) {
-  const selected = tree.alignments.find((alignment) => alignment.id === selectedAlignmentId) ?? tree.alignments[0];
-  return (
-    <section className="content workbench">
-      <div className="workMain">
-        <div className="sectionHeader">
-          <h2>对齐关系</h2>
-          <span>{tree.alignments.length} 条</span>
-        </div>
-        <div className="alignmentList">
-          {tree.alignments.map((alignment) => (
-            <button key={alignment.id} type="button" className={alignment.id === selected?.id ? 'alignment active' : 'alignment'} onClick={() => onSelect(alignment.id)}>
-              <header>
-                <strong>{alignment.name}</strong>
-                <span>{labels?.alignmentRelation[alignment.relation] ?? alignment.relation}</span>
-                <em>{labels?.alignmentStatus[alignment.status] ?? alignment.status}</em>
-              </header>
-              <Description value={alignment.description} empty="暂无说明" />
-              <div className="members">
-                {alignment.members.map((member) => (
-                  <span key={member.id}>
-                    {targetTypeLabel(member.targetType)}：{member.label ?? member.targetId}
-                  </span>
-                ))}
-              </div>
-            </button>
-          ))}
-          {tree.alignments.length === 0 ? <EmptyState title="暂无对齐关系" /> : null}
-        </div>
-      </div>
-      <aside className="workSide">
-        <AlignmentDetail alignment={selected} labels={labels} />
-        <AlignmentCreator tree={tree} onCreated={onCreated} />
-      </aside>
-    </section>
-  );
-}
-
-function McpView() {
-  return (
-    <section className="content">
-      <div className="sectionHeader">
-        <h2>MCP 工具入口</h2>
-      </div>
-      <div className="mcpGrid">
-        {mcpToolGroups.map((group) => (
-          <section className="mcpGroup" key={group.name}>
-            <h3>{group.name}</h3>
-            {group.tools.map((tool) => (
-              <article key={tool}>
-                <Server size={18} />
-                <strong>{tool}</strong>
-              </article>
-            ))}
-          </section>
-        ))}
-      </div>
-      <pre>{`# 中央服务端\npnpm start\n\n# 其它服务器上的 MCP 适配器\nnpm install -g @gavin7758521/functree-mcp\nFUNCTREE_SERVER_URL=http://192.168.124.82:4174 functree-mcp\n\n# 调试 HTTP 工具\nPOST /api/mcp/call\n{\n  "name": "functree_query_context",\n  "arguments": { "projectId": "proj_your_app", "keyword": "登录", "limit": 100 }\n}`}</pre>
-    </section>
-  );
-}
-
-function FeatureSetRows({
-  featureSets,
-  labels,
-  selectedId,
-  onSelect
-}: {
-  featureSets: FeatureSet[];
-  labels: Catalog['labels'] | undefined;
-  selectedId?: string;
-  onSelect?: (featureSetId: string) => void;
-}) {
-  return (
-    <div className="table">
-      {featureSets.map((set) => {
-        const content = (
-          <>
-            <strong>{set.name}</strong>
-            <span>{labels?.featureSetType[set.type] ?? set.type}</span>
-            <span>{set.version}</span>
-            <em>{labels?.featureSetStatus[set.status] ?? set.status}</em>
-            <small>{set.id}</small>
-          </>
-        );
-        return onSelect ? (
-          <button type="button" className={set.id === selectedId ? 'row active' : 'row'} key={set.id} onClick={() => onSelect(set.id)}>
-            {content}
-          </button>
-        ) : (
-          <div className="row" key={set.id}>
-            {content}
-          </div>
-        );
-      })}
-      {featureSets.length === 0 ? <EmptyState title="暂无功能集" /> : null}
-    </div>
-  );
-}
-
-function FeatureSetDetail({ featureSet, labels }: { featureSet: FeatureSet | undefined; labels: Catalog['labels'] | undefined }) {
-  if (!featureSet) return <EmptyState title="未选择功能集" />;
-  const featureCount = flattenFeatures(featureSet.features ?? []).length;
-  return (
-    <section className="panel">
-      <div className="sectionHeader">
-        <h2>{featureSet.name}</h2>
-        <span>{labels?.featureSetType[featureSet.type] ?? featureSet.type}</span>
-      </div>
-      <Description value={featureSet.description} empty="暂无功能集说明" />
-      <InfoGrid
-        items={[
-          ['ID', featureSet.id],
-          ['稳定键', featureSet.stableKey || '未设置'],
-          ['版本', featureSet.version],
-          ['状态', labels?.featureSetStatus[featureSet.status] ?? featureSet.status],
-          ['负责人', featureSet.owner || '未设置'],
-          ['功能数量', String(featureCount)]
-        ]}
-      />
-    </section>
-  );
-}
-
-function FeatureDetail({
-  feature,
-  labels,
-  alignments
-}: {
-  feature: Feature | undefined;
-  labels: Catalog['labels'] | undefined;
-  alignments: Alignment[];
-}) {
-  if (!feature) return <EmptyState title="未选择功能" />;
-  return (
-    <section className="panel">
-      <div className="sectionHeader">
-        <h2>{feature.name}</h2>
-        <span>{labels?.featureStatus[feature.status] ?? feature.status}</span>
-      </div>
-      <Description value={feature.description} empty="暂无功能说明" />
-      <InfoGrid
-        items={[
-          ['ID', feature.id],
-          ['稳定键', feature.stableKey],
-          ['版本', feature.version],
-          ['类型', feature.kind],
-          ['父功能', feature.parentFeatureId ?? '无'],
-          ['子功能', String(feature.children?.length ?? 0)]
-        ]}
-      />
-      <div className="detailBlock">
-        <h3>相关对齐</h3>
-        {alignments.map((alignment) => (
-          <span key={alignment.id}>{alignment.name}</span>
-        ))}
-        {alignments.length === 0 ? <small>暂无</small> : null}
-      </div>
-    </section>
-  );
-}
-
-function AlignmentDetail({ alignment, labels }: { alignment: Alignment | undefined; labels: Catalog['labels'] | undefined }) {
-  if (!alignment) return <EmptyState title="未选择对齐关系" />;
-  return (
-    <section className="panel">
-      <div className="sectionHeader">
-        <h2>{alignment.name}</h2>
-        <span>{labels?.alignmentStatus[alignment.status] ?? alignment.status}</span>
-      </div>
-      <Description value={alignment.description} empty="暂无对齐说明" />
-      <InfoGrid
-        items={[
-          ['ID', alignment.id],
-          ['稳定键', alignment.stableKey || '未设置'],
-          ['关系', labels?.alignmentRelation[alignment.relation] ?? alignment.relation],
-          ['成员数量', String(alignment.members.length)]
-        ]}
-      />
-      <div className="detailBlock">
-        <h3>成员</h3>
-        {alignment.members.map((member) => (
-          <span key={member.id}>
-            {targetTypeLabel(member.targetType)} / {member.role} / {member.label ?? member.targetId}
-          </span>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function ProjectCreator({ onCreated, compact = false }: { onCreated: (project: Project) => Promise<void>; compact?: boolean }) {
-  const [name, setName] = useState('');
-  return (
-    <form
-      className={compact ? 'quickForm compact' : 'quickForm'}
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!name.trim()) return;
-        const project = await postJson<Project>('/api/projects', { name, currentVersion: '当前', status: 'active' });
-        setName('');
-        await onCreated(project);
-      }}
-    >
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="新建项目" />
-      <button type="submit" aria-label="新建项目">
-        <Plus size={16} />
-      </button>
-    </form>
-  );
-}
-
-function FeatureSetCreator({ projectId, onCreated }: { projectId: string; onCreated: () => Promise<void> }) {
-  const [name, setName] = useState('');
-  const [stableKey, setStableKey] = useState('');
-  const [type, setType] = useState('frontend');
-  const [version, setVersion] = useState('当前');
-  return (
-    <form
-      className="editorPanel"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!projectId) return;
-        await postJson(`/api/projects/${projectId}/feature-sets`, { name, stableKey: stableKey || undefined, type, version, status: 'normal' });
-        setName('');
-        setStableKey('');
-        await onCreated();
-      }}
-    >
-      <h3>新建功能集</h3>
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="名称，例如 App 前端" required />
-      <input value={stableKey} onChange={(event) => setStableKey(event.target.value)} placeholder="稳定键，例如 web.frontend" />
-      <input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="版本" required />
-      <select value={type} onChange={(event) => setType(event.target.value)}>
-        <option value="frontend">前端</option>
-        <option value="backend">后端</option>
-        <option value="product">产品</option>
-        <option value="uiux">UI/UX</option>
-        <option value="requirement">需求</option>
-        <option value="test">测试</option>
-      </select>
-      <button type="submit">保存功能集</button>
-    </form>
-  );
-}
-
-function FeatureCreator({ tree, onCreated }: { tree: ProjectTree; onCreated: () => Promise<void> }) {
-  const [featureSetId, setFeatureSetId] = useState('');
-  const [parentFeatureId, setParentFeatureId] = useState('');
-  const [name, setName] = useState('');
-  const [stableKey, setStableKey] = useState('');
-  const [version, setVersion] = useState('当前');
-  const featureSet = featureSetId || tree.featureSets[0]?.id || '';
-  const parentOptions = flattenFeatures(tree.featureSets.find((set) => set.id === featureSet)?.features ?? []);
-  return (
-    <form
-      className="editorPanel"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!featureSet) return;
-        await postJson(`/api/feature-sets/${featureSet}/features`, {
-          name,
-          stableKey,
-          version,
-          parentFeatureId: parentFeatureId || null,
-          status: 'draft',
-          kind: 'capability'
-        });
-        setName('');
-        setStableKey('');
-        setParentFeatureId('');
-        await onCreated();
-      }}
-    >
-      <h3>新建功能</h3>
-      <select value={featureSet} onChange={(event) => setFeatureSetId(event.target.value)}>
-        {tree.featureSets.map((set) => (
-          <option key={set.id} value={set.id}>
-            {set.name} / {set.version}
-          </option>
-        ))}
-      </select>
-      <select value={parentFeatureId} onChange={(event) => setParentFeatureId(event.target.value)}>
-        <option value="">无父功能</option>
-        {parentOptions.map((feature) => (
-          <option key={feature.id} value={feature.id}>
-            {feature.name} / {feature.stableKey}
-          </option>
-        ))}
-      </select>
-      <input value={name} onChange={(event) => setName(event.target.value)} placeholder="功能名称" required />
-      <input value={stableKey} onChange={(event) => setStableKey(event.target.value)} placeholder="稳定键，例如 login" required />
-      <input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="功能版本" required />
-      <button type="submit">保存功能</button>
-    </form>
-  );
-}
-
-function AlignmentCreator({ tree, onCreated }: { tree: ProjectTree; onCreated: () => Promise<void> }) {
-  const alignables = [
-    { id: tree.project.id, label: `项目：${tree.project.name}`, type: 'project' },
-    ...tree.featureSets.map((set) => ({ id: set.id, label: `功能集：${set.name} / ${set.version}`, type: 'feature_set' })),
-    ...tree.featureSets.flatMap((set) => flattenFeatures(set.features ?? []).map((feature) => ({ id: feature.id, label: `功能：${feature.name} / ${feature.version}`, type: 'feature' })))
-  ];
-  const [first, setFirst] = useState('');
-  const [second, setSecond] = useState('');
-  const a = first || alignables[0]?.id || '';
-  const b = second || alignables[1]?.id || '';
-  return (
-    <form
-      className="editorPanel"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const firstItem = alignables.find((item) => item.id === a);
-        const secondItem = alignables.find((item) => item.id === b);
-        if (!firstItem || !secondItem || firstItem.id === secondItem.id) return;
-        await postJson(`/api/projects/${tree.project.id}/alignments`, {
-          name: `${firstItem.label} 对齐 ${secondItem.label}`,
-          relation: 'corresponds_to',
-          status: 'proposed',
-          members: [
-            { targetType: firstItem.type, targetId: firstItem.id, role: 'source' },
-            { targetType: secondItem.type, targetId: secondItem.id, role: 'target' }
-          ]
-        });
-        await onCreated();
-      }}
-    >
-      <h3>建立对齐</h3>
-      <select value={a} onChange={(event) => setFirst(event.target.value)}>
-        {alignables.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-      <select value={b} onChange={(event) => setSecond(event.target.value)}>
-        {alignables.map((item) => (
-          <option key={item.id} value={item.id}>
-            {item.label}
-          </option>
-        ))}
-      </select>
-      <button type="submit">保存对齐关系</button>
-    </form>
-  );
-}
-
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <article className="metric">
@@ -876,7 +1285,7 @@ function Description({ value, empty }: { value: string; empty: string }) {
   return <p className={value ? 'description' : 'description muted'}>{value || empty}</p>;
 }
 
-function EmptyState({ title, action }: { title: string; action?: React.ReactNode }) {
+function EmptyState({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <section className="emptyState">
       <strong>{title}</strong>
@@ -885,14 +1294,58 @@ function EmptyState({ title, action }: { title: string; action?: React.ReactNode
   );
 }
 
+function TagList({ values }: { values: string[] }) {
+  if (!values.length) return null;
+  return (
+    <div className="tagList">
+      {values.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
+    </div>
+  );
+}
+
 function flattenFeatures(features: Feature[]): Feature[] {
   return features.flatMap((feature) => [feature, ...flattenFeatures(feature.children ?? [])]);
 }
 
+function mapName(tree: ProjectTree, mapId: string | null): string {
+  if (!mapId) return '未绑定';
+  return tree.maps.find((map) => map.id === mapId)?.name ?? mapId;
+}
+
+function featureName(tree: ProjectTree, featureId: string | null): string {
+  if (!featureId) return '未绑定';
+  return tree.maps.flatMap((map) => flattenFeatures(map.features ?? [])).find((feature) => feature.id === featureId)?.name ?? featureId;
+}
+
+function entryPointName(tree: ProjectTree, entryPointId: string | null): string {
+  if (!entryPointId) return '未绑定';
+  return tree.entryPoints.find((entryPoint) => entryPoint.id === entryPointId)?.name ?? entryPointId;
+}
+
+function lineRange(reference: CodeReference): string {
+  if (!reference.lineStart) return '未设置';
+  return reference.lineEnd ? `${reference.lineStart}-${reference.lineEnd}` : String(reference.lineStart);
+}
+
 function targetTypeLabel(type: string): string {
   if (type === 'project') return '项目';
-  if (type === 'feature_set') return '功能集';
-  return '功能';
+  if (type === 'map') return '功能地图';
+  if (type === 'feature') return '功能';
+  if (type === 'entry_point') return '入口文件';
+  if (type === 'code_reference') return '代码引用';
+  return type;
+}
+
+function buildAlignables(tree: ProjectTree) {
+  return [
+    { id: tree.project.id, value: `project:${tree.project.id}`, label: `项目：${tree.project.name}`, type: 'project' },
+    ...tree.maps.map((map) => ({ id: map.id, value: `map:${map.id}`, label: `地图：${map.name}`, type: 'map' })),
+    ...tree.maps.flatMap((map) => flattenFeatures(map.features ?? []).map((feature) => ({ id: feature.id, value: `feature:${feature.id}`, label: `功能：${feature.name}`, type: 'feature' }))),
+    ...tree.entryPoints.map((entryPoint) => ({ id: entryPoint.id, value: `entry_point:${entryPoint.id}`, label: `入口：${entryPoint.name}`, type: 'entry_point' })),
+    ...tree.codeReferences.map((reference) => ({ id: reference.id, value: `code_reference:${reference.id}`, label: `引用：${reference.symbol || reference.path}`, type: 'code_reference' }))
+  ];
 }
 
 function readViewFromUrl(): View {

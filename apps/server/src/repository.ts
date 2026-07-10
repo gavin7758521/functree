@@ -1,19 +1,27 @@
 import {
   type BatchAlignmentInput,
+  type BatchCodeReferenceInput,
+  type BatchEntryPointInput,
   type BatchFeatureInput,
-  type BatchFeatureSetInput,
+  type BatchMapInput,
   type CreateAlignmentInput,
+  type CreateCodeReferenceInput,
+  type CreateEntryPointInput,
   type CreateFeatureInput,
-  type CreateFeatureSetInput,
+  type CreateMapInput,
   type CreateProjectInput,
   type QueryContextInput,
   type QueryContextType,
   BatchAlignmentSchema,
+  BatchCodeReferenceSchema,
+  BatchEntryPointSchema,
   BatchFeatureSchema,
-  BatchFeatureSetSchema,
+  BatchMapSchema,
   CreateAlignmentSchema,
+  CreateCodeReferenceSchema,
+  CreateEntryPointSchema,
   CreateFeatureSchema,
-  CreateFeatureSetSchema,
+  CreateMapSchema,
   CreateProjectSchema,
   QueryContextSchema,
   newId
@@ -32,16 +40,19 @@ export type ProjectRow = {
   updatedAt: string;
 };
 
-export type FeatureSetRow = {
+export type FeatureMapRow = {
   id: string;
   projectId: string;
   stableKey: string;
   name: string;
   version: string;
-  type: string;
+  axis: string;
+  scope: string;
+  kind: string;
   status: string;
   description: string;
   owner: string;
+  tags: string[];
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -50,7 +61,7 @@ export type FeatureSetRow = {
 export type FeatureRow = {
   id: string;
   projectId: string;
-  featureSetId: string;
+  mapId: string;
   parentFeatureId: string | null;
   stableKey: string;
   name: string;
@@ -59,10 +70,44 @@ export type FeatureRow = {
   kind: string;
   description: string;
   sortOrder: number;
+  tags: string[];
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   children?: FeatureRow[];
+};
+
+export type EntryPointRow = {
+  id: string;
+  projectId: string;
+  mapId: string | null;
+  stableKey: string;
+  name: string;
+  path: string;
+  kind: string;
+  description: string;
+  confidence: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CodeReferenceRow = {
+  id: string;
+  projectId: string;
+  mapId: string | null;
+  featureId: string | null;
+  entryPointId: string | null;
+  stableKey: string;
+  path: string;
+  symbol: string;
+  kind: string;
+  description: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AlignmentRow = {
@@ -77,6 +122,16 @@ export type AlignmentRow = {
   createdAt: string;
   updatedAt: string;
   members: AlignmentMemberRow[];
+};
+
+export type AlignmentMemberRow = {
+  id: string;
+  alignmentId: string;
+  targetType: string;
+  targetId: string;
+  role: string;
+  note: string;
+  label?: string;
 };
 
 export type UpsertOperation = 'created' | 'updated' | 'unchanged' | 'dry_run';
@@ -103,9 +158,11 @@ export type BatchUpsertResult<T> = {
 
 export type QueryContextResult = {
   projects: ProjectRow[];
-  featureSets: FeatureSetRow[];
+  maps: FeatureMapRow[];
   features: FeatureRow[];
   alignments: AlignmentRow[];
+  entryPoints: EntryPointRow[];
+  codeReferences: CodeReferenceRow[];
   page: {
     limit: number;
     offset: number;
@@ -114,25 +171,17 @@ export type QueryContextResult = {
     totals: Record<QueryContextType, number>;
   };
   summary: {
-    featureSetCount: number;
+    mapCount: number;
     featureCount: number;
     alignmentCount: number;
+    entryPointCount: number;
+    codeReferenceCount: number;
     lastUpdatedAt: string | null;
     stableKeyConflictCount: number;
   };
 };
 
 type ParsedQueryContext = ReturnType<typeof QueryContextSchema.parse>;
-
-export type AlignmentMemberRow = {
-  id: string;
-  alignmentId: string;
-  targetType: string;
-  targetId: string;
-  role: string;
-  note: string;
-  label?: string;
-};
 
 export class FuncTreeRepository {
   constructor(private readonly db: Db) {}
@@ -173,50 +222,61 @@ export class FuncTreeRepository {
     return this.getProject(id);
   }
 
-  createFeatureSet(projectId: string, input: CreateFeatureSetInput): FeatureSetRow {
-    return this.upsertFeatureSet(projectId, input).data;
+  createMap(projectId: string, input: CreateMapInput): FeatureMapRow {
+    return this.upsertMap(projectId, input).data;
   }
 
-  upsertFeatureSet(projectId: string, input: CreateFeatureSetInput): UpsertResult<FeatureSetRow> {
-    const data = CreateFeatureSetSchema.parse(input);
+  upsertMap(projectId: string, input: CreateMapInput): UpsertResult<FeatureMapRow> {
+    const data = CreateMapSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
     this.getProject(projectId);
     const now = nowIso();
-    const existing = this.findFeatureSetForUpsert(projectId, data.id, data.stableKey);
-    const id = existing?.id ?? data.id ?? newId('fs');
+    const existing = this.findMapForUpsert(projectId, data.id, data.stableKey);
+    const id = existing?.id ?? data.id ?? newId('map');
     const planned = {
       id,
       projectId,
-      stableKey: data.stableKey ?? existing?.stableKey ?? '',
+      stableKey: data.stableKey,
       name: data.name,
       version: data.version,
-      type: data.type,
+      axis: data.axis,
+      scope: data.scope,
+      kind: data.kind,
       status: data.status,
       description: data.description,
       owner: data.owner,
+      tags: data.tags,
       metadata: data.metadata,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
-    } satisfies FeatureSetRow;
-    const changedFields = existing ? changedFieldsFor(existing, planned, ['name', 'version', 'type', 'status', 'description', 'owner', 'metadata', 'stableKey']) : [];
+    } satisfies FeatureMapRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, ['stableKey', 'name', 'version', 'axis', 'scope', 'kind', 'status', 'description', 'owner', 'tags', 'metadata'])
+      : [];
     if (data.dryRun) {
-      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: existing ?? planned, dryRun: true };
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true };
     }
     if (existing && changedFields.length === 0) {
       return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
     }
     this.db
       .prepare(
-        `INSERT INTO feature_sets
-          (id, project_id, stable_key, name, version, type, status, description, owner, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO maps
+          (id, project_id, stable_key, name, version, axis, scope, kind, status, description, owner, tags_json, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            stable_key = excluded.stable_key,
            name = excluded.name,
            version = excluded.version,
-           type = excluded.type,
+           axis = excluded.axis,
+           scope = excluded.scope,
+           kind = excluded.kind,
            status = excluded.status,
            description = excluded.description,
            owner = excluded.owner,
+           tags_json = excluded.tags_json,
            metadata_json = excluded.metadata_json,
            updated_at = excluded.updated_at`
       )
@@ -226,65 +286,77 @@ export class FuncTreeRepository {
         planned.stableKey,
         planned.name,
         planned.version,
-        planned.type,
+        planned.axis,
+        planned.scope,
+        planned.kind,
         planned.status,
         planned.description,
         planned.owner,
+        jsonArray(planned.tags),
         json(planned.metadata),
         now,
         now
       );
     this.touchProject(projectId);
-    this.recordEvent(projectId, 'http', 'upsert_feature_set', { id, name: data.name });
+    this.recordEvent(projectId, 'http', 'upsert_map', { id, stableKey: data.stableKey, name: data.name });
     return {
-      operation: existing ? (changedFields.length ? 'updated' : 'unchanged') : 'created',
+      operation: existing ? 'updated' : 'created',
       changedFields,
-      data: this.getFeatureSet(id),
+      data: this.getMap(id),
       dryRun: false
     };
   }
 
-  upsertFeatureSetsBatch(input: BatchFeatureSetInput): BatchUpsertResult<FeatureSetRow> {
-    const data = BatchFeatureSetSchema.parse(input);
+  upsertMapsBatch(input: BatchMapInput): BatchUpsertResult<FeatureMapRow> {
+    const data = BatchMapSchema.parse(input);
     this.getProject(data.projectId);
-    return this.runBatch(data.dryRun, data.items, (item) => this.upsertFeatureSet(data.projectId, { ...item, dryRun: data.dryRun }));
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertMap(data.projectId, { ...item, dryRun: data.dryRun }));
   }
 
-  listFeatureSets(projectId: string): FeatureSetRow[] {
+  listMaps(projectId: string): FeatureMapRow[] {
     return this.db
-      .prepare('SELECT * FROM feature_sets WHERE project_id = ? ORDER BY type, version DESC, name')
+      .prepare('SELECT * FROM maps WHERE project_id = ? ORDER BY axis, scope, kind, name')
       .all(projectId)
-      .map(mapFeatureSet);
+      .map(mapFeatureMap);
   }
 
-  getFeatureSet(featureSetId: string): FeatureSetRow {
-    const row = this.db.prepare('SELECT * FROM feature_sets WHERE id = ?').get(featureSetId);
+  getMap(mapId: string): FeatureMapRow {
+    const row = this.db.prepare('SELECT * FROM maps WHERE id = ?').get(mapId);
     if (!row) {
-      throw new NotFoundError(`功能集不存在: ${featureSetId}`);
+      throw new NotFoundError(`功能地图不存在: ${mapId}`);
     }
-    return mapFeatureSet(row);
+    return mapFeatureMap(row);
   }
 
-  createFeature(featureSetId: string, input: CreateFeatureInput): FeatureRow {
-    return this.upsertFeature(featureSetId, input).data;
+  createFeature(mapId: string, input: CreateFeatureInput): FeatureRow {
+    return this.upsertFeature(mapId, input).data;
   }
 
-  upsertFeature(featureSetId: string, input: CreateFeatureInput): UpsertResult<FeatureRow> {
+  upsertFeature(mapId: string, input: CreateFeatureInput): UpsertResult<FeatureRow> {
     const data = CreateFeatureSchema.parse(input);
-    const featureSet = this.getFeatureSet(featureSetId);
+    if (data.mapId && data.mapId !== mapId) {
+      throw new ValidationError('mapId 与路径功能地图不一致。');
+    }
+    const featureMap = this.getMap(mapId);
+    if (data.projectId && data.projectId !== featureMap.projectId) {
+      throw new ValidationError('projectId 与功能地图所属项目不一致。');
+    }
     if (data.parentFeatureId) {
       const parent = this.getFeature(data.parentFeatureId);
-      if (parent.featureSetId !== featureSetId) {
-        throw new ValidationError('子功能必须和父功能位于同一个功能集。');
+      if (parent.mapId !== mapId) {
+        throw new ValidationError('子功能必须和父功能位于同一个功能地图。');
       }
     }
     const now = nowIso();
-    const existing = this.findFeatureForUpsert(featureSetId, data.id, data.stableKey, data.version);
+    const existing = this.findFeatureForUpsert(mapId, data.id, data.stableKey, data.version);
     const id = existing?.id ?? data.id ?? newId('feat');
+    if (data.parentFeatureId === id) {
+      throw new ValidationError('功能不能把自己设置为父功能。');
+    }
     const planned = {
       id,
-      projectId: featureSet.projectId,
-      featureSetId,
+      projectId: featureMap.projectId,
+      mapId,
       parentFeatureId: data.parentFeatureId,
       stableKey: data.stableKey,
       name: data.name,
@@ -293,15 +365,16 @@ export class FuncTreeRepository {
       kind: data.kind,
       description: data.description,
       sortOrder: data.sortOrder,
+      tags: data.tags,
       metadata: data.metadata,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     } satisfies FeatureRow;
     const changedFields = existing
-      ? changedFieldsFor(existing, planned, ['parentFeatureId', 'stableKey', 'name', 'version', 'status', 'kind', 'description', 'sortOrder', 'metadata'])
+      ? changedFieldsFor(existing, planned, ['parentFeatureId', 'stableKey', 'name', 'version', 'status', 'kind', 'description', 'sortOrder', 'tags', 'metadata'])
       : [];
     if (data.dryRun) {
-      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: existing ?? planned, dryRun: true };
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true };
     }
     if (existing && changedFields.length === 0) {
       return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
@@ -309,8 +382,8 @@ export class FuncTreeRepository {
     this.db
       .prepare(
         `INSERT INTO features
-          (id, project_id, feature_set_id, parent_feature_id, stable_key, name, version, status, kind, description, sort_order, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, project_id, map_id, parent_feature_id, stable_key, name, version, status, kind, description, sort_order, tags_json, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            parent_feature_id = excluded.parent_feature_id,
            stable_key = excluded.stable_key,
@@ -320,13 +393,14 @@ export class FuncTreeRepository {
            kind = excluded.kind,
            description = excluded.description,
            sort_order = excluded.sort_order,
+           tags_json = excluded.tags_json,
            metadata_json = excluded.metadata_json,
            updated_at = excluded.updated_at`
       )
       .run(
         id,
         planned.projectId,
-        featureSetId,
+        mapId,
         planned.parentFeatureId,
         planned.stableKey,
         planned.name,
@@ -335,15 +409,15 @@ export class FuncTreeRepository {
         planned.kind,
         planned.description,
         planned.sortOrder,
+        jsonArray(planned.tags),
         json(planned.metadata),
         now,
         now
       );
-    this.syncFeatureFts(id);
-    this.touchProject(featureSet.projectId);
-    this.recordEvent(featureSet.projectId, 'http', 'upsert_feature', { id, name: data.name });
+    this.touchProject(featureMap.projectId);
+    this.recordEvent(featureMap.projectId, 'http', 'upsert_feature', { id, mapId, stableKey: data.stableKey, name: data.name });
     return {
-      operation: existing ? (changedFields.length ? 'updated' : 'unchanged') : 'created',
+      operation: existing ? 'updated' : 'created',
       changedFields,
       data: this.getFeature(id),
       dryRun: false
@@ -352,8 +426,8 @@ export class FuncTreeRepository {
 
   upsertFeaturesBatch(input: BatchFeatureInput): BatchUpsertResult<FeatureRow> {
     const data = BatchFeatureSchema.parse(input);
-    this.getFeatureSet(data.featureSetId);
-    return this.runBatch(data.dryRun, data.items, (item) => this.upsertFeature(data.featureSetId, { ...item, dryRun: data.dryRun }));
+    this.getMap(data.mapId);
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertFeature(data.mapId, { ...item, dryRun: data.dryRun }));
   }
 
   getFeature(featureId: string): FeatureRow {
@@ -366,21 +440,234 @@ export class FuncTreeRepository {
 
   listFeatures(projectId: string): FeatureRow[] {
     return this.db
-      .prepare('SELECT * FROM features WHERE project_id = ? ORDER BY feature_set_id, parent_feature_id, sort_order, name')
+      .prepare('SELECT * FROM features WHERE project_id = ? ORDER BY map_id, parent_feature_id, sort_order, name')
       .all(projectId)
       .map(mapFeature);
   }
 
+  createEntryPoint(projectId: string, input: CreateEntryPointInput): EntryPointRow {
+    return this.upsertEntryPoint(projectId, input).data;
+  }
+
+  upsertEntryPoint(projectId: string, input: CreateEntryPointInput): UpsertResult<EntryPointRow> {
+    const data = CreateEntryPointSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
+    this.getProject(projectId);
+    const mapId = data.mapId ? this.assertMapInProject(projectId, data.mapId).id : null;
+    const now = nowIso();
+    const existing = this.findEntryPointForUpsert(projectId, data.id, data.stableKey);
+    const id = existing?.id ?? data.id ?? newId('ep');
+    const planned = {
+      id,
+      projectId,
+      mapId,
+      stableKey: data.stableKey,
+      name: data.name,
+      path: data.path,
+      kind: data.kind,
+      description: data.description,
+      confidence: data.confidence,
+      metadata: data.metadata,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    } satisfies EntryPointRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, ['mapId', 'stableKey', 'name', 'path', 'kind', 'description', 'confidence', 'metadata'])
+      : [];
+    if (data.dryRun) {
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true };
+    }
+    if (existing && changedFields.length === 0) {
+      return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO entry_points
+          (id, project_id, map_id, stable_key, name, path, kind, description, confidence, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           map_id = excluded.map_id,
+           stable_key = excluded.stable_key,
+           name = excluded.name,
+           path = excluded.path,
+           kind = excluded.kind,
+           description = excluded.description,
+           confidence = excluded.confidence,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(id, projectId, planned.mapId, planned.stableKey, planned.name, planned.path, planned.kind, planned.description, planned.confidence, json(planned.metadata), now, now);
+    this.touchProject(projectId);
+    this.recordEvent(projectId, 'http', 'upsert_entry_point', { id, stableKey: data.stableKey, path: data.path });
+    return {
+      operation: existing ? 'updated' : 'created',
+      changedFields,
+      data: this.getEntryPoint(id),
+      dryRun: false
+    };
+  }
+
+  upsertEntryPointsBatch(input: BatchEntryPointInput): BatchUpsertResult<EntryPointRow> {
+    const data = BatchEntryPointSchema.parse(input);
+    this.getProject(data.projectId);
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertEntryPoint(data.projectId, { ...item, dryRun: data.dryRun }));
+  }
+
+  getEntryPoint(entryPointId: string): EntryPointRow {
+    const row = this.db.prepare('SELECT * FROM entry_points WHERE id = ?').get(entryPointId);
+    if (!row) {
+      throw new NotFoundError(`入口文件不存在: ${entryPointId}`);
+    }
+    return mapEntryPoint(row);
+  }
+
+  listEntryPoints(projectId: string): EntryPointRow[] {
+    return this.db
+      .prepare('SELECT * FROM entry_points WHERE project_id = ? ORDER BY kind, path, name')
+      .all(projectId)
+      .map(mapEntryPoint);
+  }
+
+  createCodeReference(projectId: string, input: CreateCodeReferenceInput): CodeReferenceRow {
+    return this.upsertCodeReference(projectId, input).data;
+  }
+
+  upsertCodeReference(projectId: string, input: CreateCodeReferenceInput): UpsertResult<CodeReferenceRow> {
+    const data = CreateCodeReferenceSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
+    this.getProject(projectId);
+    const resolved = this.resolveCodeReferenceOwnership(projectId, data.mapId, data.featureId, data.entryPointId);
+    const now = nowIso();
+    const existing = this.findCodeReferenceForUpsert(projectId, data.id, data.stableKey, {
+      mapId: resolved.mapId,
+      featureId: resolved.featureId,
+      entryPointId: resolved.entryPointId,
+      path: data.path,
+      symbol: data.symbol,
+      kind: data.kind
+    });
+    const id = existing?.id ?? data.id ?? newId('ref');
+    const planned = {
+      id,
+      projectId,
+      mapId: resolved.mapId,
+      featureId: resolved.featureId,
+      entryPointId: resolved.entryPointId,
+      stableKey: data.stableKey ?? existing?.stableKey ?? '',
+      path: data.path,
+      symbol: data.symbol,
+      kind: data.kind,
+      description: data.description,
+      lineStart: data.lineStart,
+      lineEnd: data.lineEnd,
+      metadata: data.metadata,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    } satisfies CodeReferenceRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, [
+          'mapId',
+          'featureId',
+          'entryPointId',
+          'stableKey',
+          'path',
+          'symbol',
+          'kind',
+          'description',
+          'lineStart',
+          'lineEnd',
+          'metadata'
+        ])
+      : [];
+    if (data.dryRun) {
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true };
+    }
+    if (existing && changedFields.length === 0) {
+      return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO code_references
+          (id, project_id, map_id, feature_id, entry_point_id, stable_key, path, symbol, kind, description, line_start, line_end, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           map_id = excluded.map_id,
+           feature_id = excluded.feature_id,
+           entry_point_id = excluded.entry_point_id,
+           stable_key = excluded.stable_key,
+           path = excluded.path,
+           symbol = excluded.symbol,
+           kind = excluded.kind,
+           description = excluded.description,
+           line_start = excluded.line_start,
+           line_end = excluded.line_end,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        id,
+        projectId,
+        planned.mapId,
+        planned.featureId,
+        planned.entryPointId,
+        planned.stableKey,
+        planned.path,
+        planned.symbol,
+        planned.kind,
+        planned.description,
+        planned.lineStart,
+        planned.lineEnd,
+        json(planned.metadata),
+        now,
+        now
+      );
+    this.touchProject(projectId);
+    this.recordEvent(projectId, 'http', 'upsert_code_reference', { id, stableKey: data.stableKey, path: data.path, symbol: data.symbol });
+    return {
+      operation: existing ? 'updated' : 'created',
+      changedFields,
+      data: this.getCodeReference(id),
+      dryRun: false
+    };
+  }
+
+  upsertCodeReferencesBatch(input: BatchCodeReferenceInput): BatchUpsertResult<CodeReferenceRow> {
+    const data = BatchCodeReferenceSchema.parse(input);
+    this.getProject(data.projectId);
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertCodeReference(data.projectId, { ...item, dryRun: data.dryRun }));
+  }
+
+  getCodeReference(codeReferenceId: string): CodeReferenceRow {
+    const row = this.db.prepare('SELECT * FROM code_references WHERE id = ?').get(codeReferenceId);
+    if (!row) {
+      throw new NotFoundError(`代码引用不存在: ${codeReferenceId}`);
+    }
+    return mapCodeReference(row);
+  }
+
+  listCodeReferences(projectId: string): CodeReferenceRow[] {
+    return this.db
+      .prepare('SELECT * FROM code_references WHERE project_id = ? ORDER BY path, symbol, kind')
+      .all(projectId)
+      .map(mapCodeReference);
+  }
+
   getProjectTree(projectId: string) {
     const project = this.getProject(projectId);
-    const featureSets = this.listFeatureSets(projectId);
+    const maps = this.listMaps(projectId);
     const features = this.listFeatures(projectId);
     return {
       project,
-      featureSets: featureSets.map((featureSet) => ({
-        ...featureSet,
-        features: buildFeatureTree(features.filter((feature) => feature.featureSetId === featureSet.id))
+      maps: maps.map((featureMap) => ({
+        ...featureMap,
+        features: buildFeatureTree(features.filter((feature) => feature.mapId === featureMap.id))
       })),
+      entryPoints: this.listEntryPoints(projectId),
+      codeReferences: this.listCodeReferences(projectId),
       alignments: this.listAlignments(projectId)
     };
   }
@@ -391,6 +678,9 @@ export class FuncTreeRepository {
 
   upsertAlignment(projectId: string, input: CreateAlignmentInput): UpsertResult<AlignmentRow> {
     const data = CreateAlignmentSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
     this.getProject(projectId);
     for (const member of data.members) {
       this.assertAlignable(projectId, member.targetType, member.targetId);
@@ -427,7 +717,7 @@ export class FuncTreeRepository {
         ]
       : [];
     if (data.dryRun) {
-      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: existing ?? planned, dryRun: true };
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true };
     }
     if (existing && changedFields.length === 0) {
       return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
@@ -447,19 +737,7 @@ export class FuncTreeRepository {
              metadata_json = excluded.metadata_json,
              updated_at = excluded.updated_at`
         )
-        .run(
-          id,
-          projectId,
-          planned.stableKey,
-          memberSignature,
-          planned.name,
-          planned.relation,
-          planned.status,
-          planned.description,
-          json(planned.metadata),
-          now,
-          now
-        );
+        .run(id, projectId, planned.stableKey, memberSignature, planned.name, planned.relation, planned.status, planned.description, json(planned.metadata), now, now);
       this.db.prepare('DELETE FROM alignment_members WHERE alignment_id = ?').run(id);
       const insert = this.db.prepare(
         `INSERT INTO alignment_members (id, alignment_id, target_type, target_id, role, note)
@@ -470,9 +748,9 @@ export class FuncTreeRepository {
       }
     });
     this.touchProject(projectId);
-    this.recordEvent(projectId, 'http', 'upsert_alignment', { id, name: data.name });
+    this.recordEvent(projectId, 'http', 'upsert_alignment', { id, stableKey: data.stableKey, name: data.name });
     return {
-      operation: existing ? (changedFields.length ? 'updated' : 'unchanged') : 'created',
+      operation: existing ? 'updated' : 'created',
       changedFields,
       data: this.getAlignment(id),
       dryRun: false
@@ -486,11 +764,10 @@ export class FuncTreeRepository {
   }
 
   listAlignments(projectId: string): AlignmentRow[] {
-    const rows = this.db
+    return this.db
       .prepare('SELECT * FROM alignments WHERE project_id = ? ORDER BY updated_at DESC')
       .all(projectId)
       .map((row) => mapAlignment(row, this.listAlignmentMembers((row as { id: string }).id)));
-    return rows;
   }
 
   getAlignment(alignmentId: string): AlignmentRow {
@@ -503,26 +780,32 @@ export class FuncTreeRepository {
 
   queryContext(input: QueryContextInput): QueryContextResult {
     const query = QueryContextSchema.parse(input);
-    const types = new Set<QueryContextType>(query.types ?? ['project', 'feature_set', 'feature', 'alignment']);
+    const types = new Set<QueryContextType>(query.types ?? ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
     const offset = parseCursor(query.cursor) ?? query.offset;
     const limit = query.limit;
     const projects = types.has('project') ? this.queryProjects(query, limit, offset) : [];
-    const featureSets = types.has('feature_set') ? this.queryFeatureSets(query, limit, offset) : [];
+    const maps = types.has('map') ? this.queryMaps(query, limit, offset) : [];
     const features = types.has('feature') ? this.queryFeatures(query, limit, offset) : [];
     const alignments = types.has('alignment') ? this.queryAlignments(query, limit, offset) : [];
+    const entryPoints = types.has('entry_point') ? this.queryEntryPoints(query, limit, offset) : [];
+    const codeReferences = types.has('code_reference') ? this.queryCodeReferences(query, limit, offset) : [];
     const totals: Record<QueryContextType, number> = {
       project: types.has('project') ? this.countProjects(query) : 0,
-      feature_set: types.has('feature_set') ? this.countFeatureSets(query) : 0,
+      map: types.has('map') ? this.countMaps(query) : 0,
       feature: types.has('feature') ? this.countFeatures(query) : 0,
-      alignment: types.has('alignment') ? this.countAlignments(query) : 0
+      alignment: types.has('alignment') ? this.countAlignments(query) : 0,
+      entry_point: types.has('entry_point') ? this.countEntryPoints(query) : 0,
+      code_reference: types.has('code_reference') ? this.countCodeReferences(query) : 0
     };
     const hasMore = Object.values(totals).some((total) => total > offset + limit);
 
     return {
       projects,
-      featureSets,
+      maps,
       features,
       alignments,
+      entryPoints,
+      codeReferences,
       page: {
         limit,
         offset,
@@ -540,9 +823,11 @@ export class FuncTreeRepository {
       projects,
       totals: {
         projects: projects.length,
-        featureSets: (this.db.prepare('SELECT COUNT(*) AS count FROM feature_sets').get() as { count: number }).count,
-        features: (this.db.prepare('SELECT COUNT(*) AS count FROM features').get() as { count: number }).count,
-        alignments: (this.db.prepare('SELECT COUNT(*) AS count FROM alignments').get() as { count: number }).count
+        maps: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM maps').get()),
+        features: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM features').get()),
+        entryPoints: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM entry_points').get()),
+        codeReferences: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM code_references').get()),
+        alignments: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM alignments').get())
       }
     };
   }
@@ -613,17 +898,17 @@ export class FuncTreeRepository {
     return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM projects WHERE ${where.join(' AND ')}`).get(...args));
   }
 
-  private queryFeatureSets(query: ParsedQueryContext, limit: number, offset: number): FeatureSetRow[] {
-    const { where, args } = this.featureSetQueryParts(query);
+  private queryMaps(query: ParsedQueryContext, limit: number, offset: number): FeatureMapRow[] {
+    const { where, args } = this.mapQueryParts(query);
     return this.db
-      .prepare(`SELECT fs.* FROM feature_sets fs WHERE ${where.join(' AND ')} ORDER BY fs.type, fs.version DESC, fs.name LIMIT ? OFFSET ?`)
+      .prepare(`SELECT m.* FROM maps m WHERE ${where.join(' AND ')} ORDER BY m.axis, m.scope, m.kind, m.name LIMIT ? OFFSET ?`)
       .all(...args, limit, offset)
-      .map(mapFeatureSet);
+      .map(mapFeatureMap);
   }
 
-  private countFeatureSets(query: ParsedQueryContext): number {
-    const { where, args } = this.featureSetQueryParts(query);
-    return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM feature_sets fs WHERE ${where.join(' AND ')}`).get(...args));
+  private countMaps(query: ParsedQueryContext): number {
+    const { where, args } = this.mapQueryParts(query);
+    return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM maps m WHERE ${where.join(' AND ')}`).get(...args));
   }
 
   private queryFeatures(query: ParsedQueryContext, limit: number, offset: number): FeatureRow[] {
@@ -633,7 +918,7 @@ export class FuncTreeRepository {
         `SELECT f.*
          FROM features f
          WHERE ${where.join(' AND ')}
-         ORDER BY f.feature_set_id, f.parent_feature_id, f.sort_order, f.name
+         ORDER BY f.map_id, f.parent_feature_id, f.sort_order, f.name
          LIMIT ? OFFSET ?`
       )
       .all(...args, limit, offset)
@@ -643,6 +928,32 @@ export class FuncTreeRepository {
   private countFeatures(query: ParsedQueryContext): number {
     const { where, args } = this.featureQueryParts(query);
     return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM features f WHERE ${where.join(' AND ')}`).get(...args));
+  }
+
+  private queryEntryPoints(query: ParsedQueryContext, limit: number, offset: number): EntryPointRow[] {
+    const { where, args } = this.entryPointQueryParts(query);
+    return this.db
+      .prepare(`SELECT ep.* FROM entry_points ep WHERE ${where.join(' AND ')} ORDER BY ep.kind, ep.path, ep.name LIMIT ? OFFSET ?`)
+      .all(...args, limit, offset)
+      .map(mapEntryPoint);
+  }
+
+  private countEntryPoints(query: ParsedQueryContext): number {
+    const { where, args } = this.entryPointQueryParts(query);
+    return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM entry_points ep WHERE ${where.join(' AND ')}`).get(...args));
+  }
+
+  private queryCodeReferences(query: ParsedQueryContext, limit: number, offset: number): CodeReferenceRow[] {
+    const { where, args } = this.codeReferenceQueryParts(query);
+    return this.db
+      .prepare(`SELECT cr.* FROM code_references cr WHERE ${where.join(' AND ')} ORDER BY cr.path, cr.symbol, cr.kind LIMIT ? OFFSET ?`)
+      .all(...args, limit, offset)
+      .map(mapCodeReference);
+  }
+
+  private countCodeReferences(query: ParsedQueryContext): number {
+    const { where, args } = this.codeReferenceQueryParts(query);
+    return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM code_references cr WHERE ${where.join(' AND ')}`).get(...args));
   }
 
   private queryAlignments(query: ParsedQueryContext, limit: number, offset: number): AlignmentRow[] {
@@ -665,41 +976,63 @@ export class FuncTreeRepository {
       where.push('id = ?');
       args.push(query.projectId);
     }
-    if (query.stableKey || query.featureSetId || query.alignmentId || query.parentFeatureId !== undefined) {
+    if (query.stableKey || query.mapId || query.alignmentId || query.parentFeatureId !== undefined || query.entryPointId || query.codeReferenceId || query.path) {
       where.push('0=1');
     }
     appendKeywordClause(where, args, 'projects', ['id', 'name', 'current_version', 'description'], query.keyword);
     return { where, args };
   }
 
-  private featureSetQueryParts(query: ParsedQueryContext): QueryParts {
+  private mapQueryParts(query: ParsedQueryContext): QueryParts {
     const where = ['1=1'];
     const args: SQLInputValue[] = [];
     if (query.projectId) {
-      where.push('fs.project_id = ?');
+      where.push('m.project_id = ?');
       args.push(query.projectId);
     }
-    if (query.featureSetId) {
-      where.push('fs.id = ?');
-      args.push(query.featureSetId);
+    if (query.mapId) {
+      where.push('m.id = ?');
+      args.push(query.mapId);
     }
     if (query.stableKey) {
-      where.push('fs.stable_key = ?');
+      where.push('m.stable_key = ?');
       args.push(query.stableKey);
     }
     if (query.alignmentId) {
       where.push(
         `EXISTS (
           SELECT 1 FROM alignment_members am
-          WHERE am.alignment_id = ? AND am.target_type = 'feature_set' AND am.target_id = fs.id
+          WHERE am.alignment_id = ? AND am.target_type = 'map' AND am.target_id = m.id
         )`
       );
       args.push(query.alignmentId);
     }
-    if (query.parentFeatureId !== undefined) {
-      where.push('0=1');
+    if (query.entryPointId) {
+      where.push('EXISTS (SELECT 1 FROM entry_points ep WHERE ep.id = ? AND ep.map_id = m.id)');
+      args.push(query.entryPointId);
     }
-    appendKeywordClause(where, args, 'fs', ['id', 'stable_key', 'name', 'version', 'type', 'status', 'description', 'owner'], query.keyword);
+    if (query.codeReferenceId) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.id = ? AND cr.map_id = m.id)');
+      args.push(query.codeReferenceId);
+    }
+    if (query.parentFeatureId !== undefined) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM features f
+          WHERE f.map_id = m.id AND ${query.parentFeatureId === null ? 'f.parent_feature_id IS NULL' : 'f.parent_feature_id = ?'}
+        )`
+      );
+      if (query.parentFeatureId) args.push(query.parentFeatureId);
+    }
+    if (query.path) {
+      where.push(
+        `(EXISTS (SELECT 1 FROM entry_points ep WHERE ep.map_id = m.id AND LOWER(ep.path) LIKE ? ESCAPE '\\')
+          OR EXISTS (SELECT 1 FROM code_references cr WHERE cr.map_id = m.id AND LOWER(cr.path) LIKE ? ESCAPE '\\'))`
+      );
+      const pattern = likePattern(query.path);
+      args.push(pattern, pattern);
+    }
+    appendKeywordClause(where, args, 'm', ['id', 'stable_key', 'name', 'version', 'axis', 'scope', 'kind', 'status', 'description', 'owner'], query.keyword);
     return { where, args };
   }
 
@@ -710,9 +1043,9 @@ export class FuncTreeRepository {
       where.push('f.project_id = ?');
       args.push(query.projectId);
     }
-    if (query.featureSetId) {
-      where.push('f.feature_set_id = ?');
-      args.push(query.featureSetId);
+    if (query.mapId) {
+      where.push('f.map_id = ?');
+      args.push(query.mapId);
     }
     if (query.stableKey) {
       where.push('f.stable_key = ?');
@@ -733,7 +1066,133 @@ export class FuncTreeRepository {
       where.push('f.parent_feature_id = ?');
       args.push(query.parentFeatureId);
     }
+    if (query.entryPointId) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.feature_id = f.id AND cr.entry_point_id = ?)');
+      args.push(query.entryPointId);
+    }
+    if (query.codeReferenceId) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.id = ? AND cr.feature_id = f.id)');
+      args.push(query.codeReferenceId);
+    }
+    if (query.path) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.feature_id = f.id AND LOWER(cr.path) LIKE ? ESCAPE \'\\\')');
+      args.push(likePattern(query.path));
+    }
     appendKeywordClause(where, args, 'f', ['id', 'stable_key', 'name', 'version', 'status', 'kind', 'description'], query.keyword);
+    return { where, args };
+  }
+
+  private entryPointQueryParts(query: ParsedQueryContext): QueryParts {
+    const where = ['1=1'];
+    const args: SQLInputValue[] = [];
+    if (query.projectId) {
+      where.push('ep.project_id = ?');
+      args.push(query.projectId);
+    }
+    if (query.mapId) {
+      where.push('ep.map_id = ?');
+      args.push(query.mapId);
+    }
+    if (query.entryPointId) {
+      where.push('ep.id = ?');
+      args.push(query.entryPointId);
+    }
+    if (query.codeReferenceId) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.id = ? AND cr.entry_point_id = ep.id)');
+      args.push(query.codeReferenceId);
+    }
+    if (query.stableKey) {
+      where.push('ep.stable_key = ?');
+      args.push(query.stableKey);
+    }
+    if (query.alignmentId) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM alignment_members am
+          WHERE am.alignment_id = ? AND am.target_type = 'entry_point' AND am.target_id = ep.id
+        )`
+      );
+      args.push(query.alignmentId);
+    }
+    if (query.parentFeatureId === null) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM code_references cr
+          JOIN features f ON f.id = cr.feature_id
+          WHERE cr.entry_point_id = ep.id AND f.parent_feature_id IS NULL
+        )`
+      );
+    } else if (query.parentFeatureId) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM code_references cr
+          JOIN features f ON f.id = cr.feature_id
+          WHERE cr.entry_point_id = ep.id AND f.parent_feature_id = ?
+        )`
+      );
+      args.push(query.parentFeatureId);
+    }
+    if (query.path) {
+      where.push('LOWER(ep.path) LIKE ? ESCAPE \'\\\'');
+      args.push(likePattern(query.path));
+    }
+    appendKeywordClause(where, args, 'ep', ['id', 'stable_key', 'name', 'path', 'kind', 'description'], query.keyword);
+    return { where, args };
+  }
+
+  private codeReferenceQueryParts(query: ParsedQueryContext): QueryParts {
+    const where = ['1=1'];
+    const args: SQLInputValue[] = [];
+    if (query.projectId) {
+      where.push('cr.project_id = ?');
+      args.push(query.projectId);
+    }
+    if (query.mapId) {
+      where.push('cr.map_id = ?');
+      args.push(query.mapId);
+    }
+    if (query.entryPointId) {
+      where.push('cr.entry_point_id = ?');
+      args.push(query.entryPointId);
+    }
+    if (query.codeReferenceId) {
+      where.push('cr.id = ?');
+      args.push(query.codeReferenceId);
+    }
+    if (query.stableKey) {
+      where.push('cr.stable_key = ?');
+      args.push(query.stableKey);
+    }
+    if (query.alignmentId) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM alignment_members am
+          WHERE am.alignment_id = ? AND am.target_type = 'code_reference' AND am.target_id = cr.id
+        )`
+      );
+      args.push(query.alignmentId);
+    }
+    if (query.parentFeatureId === null) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM features f
+          WHERE f.id = cr.feature_id AND f.parent_feature_id IS NULL
+        )`
+      );
+    } else if (query.parentFeatureId) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM features f
+          WHERE f.id = cr.feature_id AND f.parent_feature_id = ?
+        )`
+      );
+      args.push(query.parentFeatureId);
+    }
+    if (query.path) {
+      where.push('LOWER(cr.path) LIKE ? ESCAPE \'\\\'');
+      args.push(likePattern(query.path));
+    }
+    appendKeywordClause(where, args, 'cr', ['id', 'stable_key', 'path', 'symbol', 'kind', 'description'], query.keyword);
     return { where, args };
   }
 
@@ -752,28 +1211,36 @@ export class FuncTreeRepository {
       where.push('a.stable_key = ?');
       args.push(query.stableKey);
     }
-    if (query.featureSetId) {
+    if (query.mapId) {
       where.push(
         `EXISTS (
           SELECT 1
           FROM alignment_members am
           LEFT JOIN features f ON am.target_type = 'feature' AND f.id = am.target_id
+          LEFT JOIN entry_points ep ON am.target_type = 'entry_point' AND ep.id = am.target_id
+          LEFT JOIN code_references cr ON am.target_type = 'code_reference' AND cr.id = am.target_id
           WHERE am.alignment_id = a.id
             AND (
-              (am.target_type = 'feature_set' AND am.target_id = ?)
-              OR (am.target_type = 'feature' AND f.feature_set_id = ?)
+              (am.target_type = 'map' AND am.target_id = ?)
+              OR (am.target_type = 'feature' AND f.map_id = ?)
+              OR (am.target_type = 'entry_point' AND ep.map_id = ?)
+              OR (am.target_type = 'code_reference' AND cr.map_id = ?)
             )
         )`
       );
-      args.push(query.featureSetId, query.featureSetId);
+      args.push(query.mapId, query.mapId, query.mapId, query.mapId);
     }
     if (query.parentFeatureId === null) {
       where.push(
         `EXISTS (
           SELECT 1
           FROM alignment_members am
-          JOIN features f ON am.target_type = 'feature' AND f.id = am.target_id
-          WHERE am.alignment_id = a.id AND f.parent_feature_id IS NULL
+          LEFT JOIN features f ON am.target_type = 'feature' AND f.id = am.target_id
+          LEFT JOIN code_references cr ON am.target_type = 'code_reference' AND cr.id = am.target_id
+          LEFT JOIN features rf ON rf.id = cr.feature_id
+          WHERE am.alignment_id = a.id
+            AND ((am.target_type = 'feature' AND f.parent_feature_id IS NULL)
+              OR (am.target_type = 'code_reference' AND rf.parent_feature_id IS NULL))
         )`
       );
     } else if (query.parentFeatureId) {
@@ -781,11 +1248,50 @@ export class FuncTreeRepository {
         `EXISTS (
           SELECT 1
           FROM alignment_members am
-          JOIN features f ON am.target_type = 'feature' AND f.id = am.target_id
-          WHERE am.alignment_id = a.id AND f.parent_feature_id = ?
+          LEFT JOIN features f ON am.target_type = 'feature' AND f.id = am.target_id
+          LEFT JOIN code_references cr ON am.target_type = 'code_reference' AND cr.id = am.target_id
+          WHERE am.alignment_id = a.id
+            AND ((am.target_type = 'feature' AND f.parent_feature_id = ?)
+              OR (am.target_type = 'code_reference' AND cr.feature_id IN (SELECT id FROM features WHERE parent_feature_id = ?)))
         )`
       );
-      args.push(query.parentFeatureId);
+      args.push(query.parentFeatureId, query.parentFeatureId);
+    }
+    if (query.entryPointId) {
+      where.push(
+        `EXISTS (
+          SELECT 1
+          FROM alignment_members am
+          LEFT JOIN code_references cr ON am.target_type = 'code_reference' AND cr.id = am.target_id
+          WHERE am.alignment_id = a.id
+            AND ((am.target_type = 'entry_point' AND am.target_id = ?) OR (am.target_type = 'code_reference' AND cr.entry_point_id = ?))
+        )`
+      );
+      args.push(query.entryPointId, query.entryPointId);
+    }
+    if (query.codeReferenceId) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM alignment_members am
+          WHERE am.alignment_id = a.id AND am.target_type = 'code_reference' AND am.target_id = ?
+        )`
+      );
+      args.push(query.codeReferenceId);
+    }
+    if (query.path) {
+      where.push(
+        `EXISTS (
+          SELECT 1
+          FROM alignment_members am
+          LEFT JOIN entry_points ep ON am.target_type = 'entry_point' AND ep.id = am.target_id
+          LEFT JOIN code_references cr ON am.target_type = 'code_reference' AND cr.id = am.target_id
+          WHERE am.alignment_id = a.id
+            AND ((am.target_type = 'entry_point' AND LOWER(ep.path) LIKE ? ESCAPE '\\')
+              OR (am.target_type = 'code_reference' AND LOWER(cr.path) LIKE ? ESCAPE '\\'))
+        )`
+      );
+      const pattern = likePattern(query.path);
+      args.push(pattern, pattern);
     }
     appendKeywordClause(where, args, 'a', ['id', 'stable_key', 'name', 'relation', 'status', 'description'], query.keyword);
     return { where, args };
@@ -795,9 +1301,11 @@ export class FuncTreeRepository {
     const projectWhere = projectId ? 'WHERE project_id = ?' : '';
     const projectArgs = projectId ? [projectId] : [];
     return {
-      featureSetCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM feature_sets ${projectWhere}`).get(...projectArgs)),
+      mapCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM maps ${projectWhere}`).get(...projectArgs)),
       featureCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM features ${projectWhere}`).get(...projectArgs)),
       alignmentCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM alignments ${projectWhere}`).get(...projectArgs)),
+      entryPointCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM entry_points ${projectWhere}`).get(...projectArgs)),
+      codeReferenceCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM code_references ${projectWhere}`).get(...projectArgs)),
       lastUpdatedAt: this.lastUpdatedAt(projectId),
       stableKeyConflictCount: this.stableKeyConflictCount(projectId)
     };
@@ -810,19 +1318,23 @@ export class FuncTreeRepository {
             `SELECT MAX(updated_at) AS updated_at
              FROM (
                SELECT updated_at FROM projects WHERE id = ?
-               UNION ALL SELECT updated_at FROM feature_sets WHERE project_id = ?
+               UNION ALL SELECT updated_at FROM maps WHERE project_id = ?
                UNION ALL SELECT updated_at FROM features WHERE project_id = ?
+               UNION ALL SELECT updated_at FROM entry_points WHERE project_id = ?
+               UNION ALL SELECT updated_at FROM code_references WHERE project_id = ?
                UNION ALL SELECT updated_at FROM alignments WHERE project_id = ?
              )`
           )
-          .get(projectId, projectId, projectId, projectId) as { updated_at: string | null })
+          .get(projectId, projectId, projectId, projectId, projectId, projectId) as { updated_at: string | null })
       : (this.db
           .prepare(
             `SELECT MAX(updated_at) AS updated_at
              FROM (
                SELECT updated_at FROM projects
-               UNION ALL SELECT updated_at FROM feature_sets
+               UNION ALL SELECT updated_at FROM maps
                UNION ALL SELECT updated_at FROM features
+               UNION ALL SELECT updated_at FROM entry_points
+               UNION ALL SELECT updated_at FROM code_references
                UNION ALL SELECT updated_at FROM alignments
              )`
           )
@@ -832,15 +1344,19 @@ export class FuncTreeRepository {
 
   private stableKeyConflictCount(projectId: string | undefined): number {
     const filter = projectId ? 'AND project_id = ?' : '';
-    const args = projectId ? [projectId, projectId, projectId] : [];
+    const args = projectId ? [projectId, projectId, projectId, projectId, projectId] : [];
     return scalarCount(
       this.db
         .prepare(
           `SELECT COALESCE(SUM(conflicts), 0) AS count
            FROM (
-             SELECT COUNT(*) - 1 AS conflicts FROM feature_sets WHERE stable_key <> '' ${filter} GROUP BY project_id, stable_key HAVING COUNT(*) > 1
+             SELECT COUNT(*) - 1 AS conflicts FROM maps WHERE stable_key <> '' ${filter} GROUP BY project_id, stable_key HAVING COUNT(*) > 1
              UNION ALL
-             SELECT COUNT(*) - 1 AS conflicts FROM features WHERE stable_key <> '' ${filter} GROUP BY project_id, feature_set_id, stable_key, version HAVING COUNT(*) > 1
+             SELECT COUNT(*) - 1 AS conflicts FROM features WHERE stable_key <> '' ${filter} GROUP BY project_id, map_id, stable_key, version HAVING COUNT(*) > 1
+             UNION ALL
+             SELECT COUNT(*) - 1 AS conflicts FROM entry_points WHERE stable_key <> '' ${filter} GROUP BY project_id, stable_key HAVING COUNT(*) > 1
+             UNION ALL
+             SELECT COUNT(*) - 1 AS conflicts FROM code_references WHERE stable_key <> '' ${filter} GROUP BY project_id, stable_key HAVING COUNT(*) > 1
              UNION ALL
              SELECT COUNT(*) - 1 AS conflicts FROM alignments WHERE stable_key <> '' ${filter} GROUP BY project_id, stable_key HAVING COUNT(*) > 1
            )`
@@ -849,50 +1365,71 @@ export class FuncTreeRepository {
     );
   }
 
-  private findFeatureSetForUpsert(projectId: string, id: string | undefined, stableKey: string | undefined): FeatureSetRow | null {
-    const byId = id ? this.findFeatureSetById(id) : null;
+  private findMapForUpsert(projectId: string, id: string | undefined, stableKey: string): FeatureMapRow | null {
+    const byId = id ? this.findMapById(id) : null;
     if (byId && byId.projectId !== projectId) {
-      throw new ValidationError('功能集 ID 不属于当前项目。');
+      throw new ValidationError('功能地图 ID 不属于当前项目。');
     }
-    const byStableKey = stableKey ? this.findFeatureSetByStableKey(projectId, stableKey) : null;
+    const byStableKey = this.findMapByStableKey(projectId, stableKey);
     if (byId && byStableKey && byId.id !== byStableKey.id) {
-      throw new ValidationError('功能集 id 和 stableKey 指向不同对象，请先查询上下文确认。');
+      throw new ValidationError('功能地图 id 和 stableKey 指向不同对象，请先查询上下文确认。');
     }
     return byId ?? byStableKey;
   }
 
-  private findFeatureById(featureId: string): FeatureRow | null {
-    const row = this.db.prepare('SELECT * FROM features WHERE id = ?').get(featureId);
-    return row ? mapFeature(row) : null;
-  }
-
-  private findFeatureSetById(featureSetId: string): FeatureSetRow | null {
-    const row = this.db.prepare('SELECT * FROM feature_sets WHERE id = ?').get(featureSetId);
-    return row ? mapFeatureSet(row) : null;
-  }
-
-  private findFeatureSetByStableKey(projectId: string, stableKey: string): FeatureSetRow | null {
-    const row = this.db.prepare('SELECT * FROM feature_sets WHERE project_id = ? AND stable_key = ?').get(projectId, stableKey);
-    return row ? mapFeatureSet(row) : null;
-  }
-
-  private findFeatureForUpsert(featureSetId: string, id: string | undefined, stableKey: string, version: string): FeatureRow | null {
+  private findFeatureForUpsert(mapId: string, id: string | undefined, stableKey: string, version: string): FeatureRow | null {
     const byId = id ? this.findFeatureById(id) : null;
-    if (byId && byId.featureSetId !== featureSetId) {
-      throw new ValidationError('功能 ID 不属于当前功能集。');
+    if (byId && byId.mapId !== mapId) {
+      throw new ValidationError('功能 ID 不属于当前功能地图。');
     }
-    const byStableKey = this.findFeatureByStableKey(featureSetId, stableKey, version);
+    const byStableKey = this.findFeatureByStableKey(mapId, stableKey, version);
     if (byId && byStableKey && byId.id !== byStableKey.id) {
       throw new ValidationError('功能 id 和 stableKey/version 指向不同对象，请先查询上下文确认。');
     }
     return byId ?? byStableKey;
   }
 
-  private findFeatureByStableKey(featureSetId: string, stableKey: string, version: string): FeatureRow | null {
-    const row = this.db
-      .prepare('SELECT * FROM features WHERE feature_set_id = ? AND stable_key = ? AND version = ?')
-      .get(featureSetId, stableKey, version);
-    return row ? mapFeature(row) : null;
+  private findEntryPointForUpsert(projectId: string, id: string | undefined, stableKey: string): EntryPointRow | null {
+    const byId = id ? this.findEntryPointById(id) : null;
+    if (byId && byId.projectId !== projectId) {
+      throw new ValidationError('入口文件 ID 不属于当前项目。');
+    }
+    const byStableKey = this.findEntryPointByStableKey(projectId, stableKey);
+    if (byId && byStableKey && byId.id !== byStableKey.id) {
+      throw new ValidationError('入口文件 id 和 stableKey 指向不同对象，请先查询上下文确认。');
+    }
+    return byId ?? byStableKey;
+  }
+
+  private findCodeReferenceForUpsert(
+    projectId: string,
+    id: string | undefined,
+    stableKey: string | undefined,
+    signature: {
+      mapId: string | null;
+      featureId: string | null;
+      entryPointId: string | null;
+      path: string;
+      symbol: string;
+      kind: string;
+    }
+  ): CodeReferenceRow | null {
+    const matches = [
+      id ? this.findCodeReferenceById(id) : null,
+      stableKey ? this.findCodeReferenceByStableKey(projectId, stableKey) : null,
+      !id && !stableKey ? this.findCodeReferenceBySignature(projectId, signature) : null
+    ].filter((reference): reference is CodeReferenceRow => Boolean(reference));
+
+    for (const reference of matches) {
+      if (reference.projectId !== projectId) {
+        throw new ValidationError('代码引用 ID 不属于当前项目。');
+      }
+    }
+    const [first] = matches;
+    if (first && matches.some((reference) => reference.id !== first.id)) {
+      throw new ValidationError('代码引用 id、stableKey 或路径签名指向不同对象，请先查询上下文确认。');
+    }
+    return first ?? null;
   }
 
   private findAlignmentForUpsert(projectId: string, id: string | undefined, stableKey: string | undefined, memberSignature: string): AlignmentRow | null {
@@ -913,6 +1450,74 @@ export class FuncTreeRepository {
       throw new ValidationError('对齐关系 id、stableKey 或成员集合指向不同对象，请先查询上下文确认。');
     }
     return first ?? null;
+  }
+
+  private findMapById(mapId: string): FeatureMapRow | null {
+    const row = this.db.prepare('SELECT * FROM maps WHERE id = ?').get(mapId);
+    return row ? mapFeatureMap(row) : null;
+  }
+
+  private findMapByStableKey(projectId: string, stableKey: string): FeatureMapRow | null {
+    const row = this.db.prepare('SELECT * FROM maps WHERE project_id = ? AND stable_key = ?').get(projectId, stableKey);
+    return row ? mapFeatureMap(row) : null;
+  }
+
+  private findFeatureById(featureId: string): FeatureRow | null {
+    const row = this.db.prepare('SELECT * FROM features WHERE id = ?').get(featureId);
+    return row ? mapFeature(row) : null;
+  }
+
+  private findFeatureByStableKey(mapId: string, stableKey: string, version: string): FeatureRow | null {
+    const row = this.db.prepare('SELECT * FROM features WHERE map_id = ? AND stable_key = ? AND version = ?').get(mapId, stableKey, version);
+    return row ? mapFeature(row) : null;
+  }
+
+  private findEntryPointById(entryPointId: string): EntryPointRow | null {
+    const row = this.db.prepare('SELECT * FROM entry_points WHERE id = ?').get(entryPointId);
+    return row ? mapEntryPoint(row) : null;
+  }
+
+  private findEntryPointByStableKey(projectId: string, stableKey: string): EntryPointRow | null {
+    const row = this.db.prepare('SELECT * FROM entry_points WHERE project_id = ? AND stable_key = ?').get(projectId, stableKey);
+    return row ? mapEntryPoint(row) : null;
+  }
+
+  private findCodeReferenceById(codeReferenceId: string): CodeReferenceRow | null {
+    const row = this.db.prepare('SELECT * FROM code_references WHERE id = ?').get(codeReferenceId);
+    return row ? mapCodeReference(row) : null;
+  }
+
+  private findCodeReferenceByStableKey(projectId: string, stableKey: string): CodeReferenceRow | null {
+    const row = this.db.prepare('SELECT * FROM code_references WHERE project_id = ? AND stable_key = ?').get(projectId, stableKey);
+    return row ? mapCodeReference(row) : null;
+  }
+
+  private findCodeReferenceBySignature(
+    projectId: string,
+    signature: {
+      mapId: string | null;
+      featureId: string | null;
+      entryPointId: string | null;
+      path: string;
+      symbol: string;
+      kind: string;
+    }
+  ): CodeReferenceRow | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM code_references
+         WHERE project_id = ?
+           AND COALESCE(map_id, '') = COALESCE(?, '')
+           AND COALESCE(feature_id, '') = COALESCE(?, '')
+           AND COALESCE(entry_point_id, '') = COALESCE(?, '')
+           AND path = ?
+           AND symbol = ?
+           AND kind = ?
+         ORDER BY updated_at DESC
+         LIMIT 1`
+      )
+      .get(projectId, signature.mapId, signature.featureId, signature.entryPointId, signature.path, signature.symbol, signature.kind);
+    return row ? mapCodeReference(row) : null;
   }
 
   private findAlignmentById(alignmentId: string): AlignmentRow | null {
@@ -942,12 +1547,57 @@ export class FuncTreeRepository {
 
   private listAlignmentMembers(alignmentId: string): AlignmentMemberRow[] {
     return this.db
-      .prepare('SELECT * FROM alignment_members WHERE alignment_id = ? ORDER BY role, target_type')
+      .prepare('SELECT * FROM alignment_members WHERE alignment_id = ? ORDER BY role, target_type, target_id')
       .all(alignmentId)
       .map((row) => {
         const member = mapAlignmentMember(row);
         return { ...member, label: this.alignableLabel(member.targetType, member.targetId) };
       });
+  }
+
+  private assertMapInProject(projectId: string, mapId: string): FeatureMapRow {
+    const featureMap = this.getMap(mapId);
+    if (featureMap.projectId !== projectId) {
+      throw new ValidationError('功能地图不属于当前项目。');
+    }
+    return featureMap;
+  }
+
+  private resolveCodeReferenceOwnership(
+    projectId: string,
+    mapId: string | undefined,
+    featureId: string | undefined,
+    entryPointId: string | undefined
+  ): { mapId: string | null; featureId: string | null; entryPointId: string | null } {
+    let resolvedMapId = mapId ?? null;
+    const feature = featureId ? this.getFeature(featureId) : null;
+    const entryPoint = entryPointId ? this.getEntryPoint(entryPointId) : null;
+
+    if (resolvedMapId) {
+      this.assertMapInProject(projectId, resolvedMapId);
+    }
+    if (feature) {
+      if (feature.projectId !== projectId) {
+        throw new ValidationError('功能不属于当前项目。');
+      }
+      resolvedMapId ??= feature.mapId;
+      if (resolvedMapId !== feature.mapId) {
+        throw new ValidationError('代码引用的 mapId 与 featureId 所属功能地图不一致。');
+      }
+    }
+    if (entryPoint) {
+      if (entryPoint.projectId !== projectId) {
+        throw new ValidationError('入口文件不属于当前项目。');
+      }
+      if (entryPoint.mapId) {
+        resolvedMapId ??= entryPoint.mapId;
+        if (resolvedMapId !== entryPoint.mapId) {
+          throw new ValidationError('代码引用的 mapId 与 entryPointId 所属功能地图不一致。');
+        }
+      }
+    }
+
+    return { mapId: resolvedMapId, featureId: feature?.id ?? null, entryPointId: entryPoint?.id ?? null };
   }
 
   private assertAlignable(projectId: string, targetType: string, targetId: string): void {
@@ -958,38 +1608,48 @@ export class FuncTreeRepository {
       }
       return;
     }
-    if (targetType === 'feature_set') {
-      const featureSet = this.getFeatureSet(targetId);
-      if (featureSet.projectId !== projectId) {
-        throw new ValidationError('功能集不属于当前项目。');
+    if (targetType === 'map') {
+      this.assertMapInProject(projectId, targetId);
+      return;
+    }
+    if (targetType === 'feature') {
+      const feature = this.getFeature(targetId);
+      if (feature.projectId !== projectId) {
+        throw new ValidationError('功能不属于当前项目。');
       }
       return;
     }
-    const feature = this.getFeature(targetId);
-    if (feature.projectId !== projectId) {
-      throw new ValidationError('功能不属于当前项目。');
+    if (targetType === 'entry_point') {
+      const entryPoint = this.getEntryPoint(targetId);
+      if (entryPoint.projectId !== projectId) {
+        throw new ValidationError('入口文件不属于当前项目。');
+      }
+      return;
     }
+    if (targetType === 'code_reference') {
+      const reference = this.getCodeReference(targetId);
+      if (reference.projectId !== projectId) {
+        throw new ValidationError('代码引用不属于当前项目。');
+      }
+      return;
+    }
+    throw new ValidationError(`不支持的对齐对象类型: ${targetType}`);
   }
 
   private alignableLabel(targetType: string, targetId: string): string {
     try {
       if (targetType === 'project') return this.getProject(targetId).name;
-      if (targetType === 'feature_set') return this.getFeatureSet(targetId).name;
-      return this.getFeature(targetId).name;
+      if (targetType === 'map') return this.getMap(targetId).name;
+      if (targetType === 'feature') return this.getFeature(targetId).name;
+      if (targetType === 'entry_point') return this.getEntryPoint(targetId).name;
+      if (targetType === 'code_reference') {
+        const reference = this.getCodeReference(targetId);
+        return reference.symbol ? `${reference.path}#${reference.symbol}` : reference.path;
+      }
+      return targetId;
     } catch {
       return targetId;
     }
-  }
-
-  private syncFeatureFts(featureId: string): void {
-    const feature = this.getFeature(featureId);
-    this.db.prepare('DELETE FROM features_fts WHERE id = ?').run(featureId);
-    this.db
-      .prepare(
-        `INSERT INTO features_fts (id, project_id, feature_set_id, name, stable_key, version, description)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(feature.id, feature.projectId, feature.featureSetId, feature.name, feature.stableKey, feature.version, feature.description);
   }
 
   private touchProject(projectId: string): void {
@@ -1005,7 +1665,7 @@ export class FuncTreeRepository {
 
 export class NotFoundError extends Error {
   readonly code = 'NOT_FOUND';
-  readonly hint = '先通过 functree_query_context 确认项目、功能集、功能或对齐关系 ID 是否存在。';
+  readonly hint = '先通过 functree_query_context 确认项目、功能地图、功能、入口文件、代码引用或对齐关系 ID 是否存在。';
 }
 
 export class ValidationError extends Error {
@@ -1047,18 +1707,21 @@ function mapProject(row: unknown): ProjectRow {
   };
 }
 
-function mapFeatureSet(row: unknown): FeatureSetRow {
+function mapFeatureMap(row: unknown): FeatureMapRow {
   const value = row as Record<string, unknown>;
   return {
     id: String(value.id),
     projectId: String(value.project_id),
-    stableKey: String(value.stable_key ?? ''),
+    stableKey: String(value.stable_key),
     name: String(value.name),
     version: String(value.version),
-    type: String(value.type),
+    axis: String(value.axis),
+    scope: String(value.scope),
+    kind: String(value.kind),
     status: String(value.status),
     description: String(value.description ?? ''),
     owner: String(value.owner ?? ''),
+    tags: parseStringArray(value.tags_json),
     metadata: parseJson(value.metadata_json),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at)
@@ -1070,7 +1733,7 @@ function mapFeature(row: unknown): FeatureRow {
   return {
     id: String(value.id),
     projectId: String(value.project_id),
-    featureSetId: String(value.feature_set_id),
+    mapId: String(value.map_id),
     parentFeatureId: value.parent_feature_id ? String(value.parent_feature_id) : null,
     stableKey: String(value.stable_key),
     name: String(value.name),
@@ -1079,6 +1742,46 @@ function mapFeature(row: unknown): FeatureRow {
     kind: String(value.kind),
     description: String(value.description ?? ''),
     sortOrder: Number(value.sort_order ?? 0),
+    tags: parseStringArray(value.tags_json),
+    metadata: parseJson(value.metadata_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at)
+  };
+}
+
+function mapEntryPoint(row: unknown): EntryPointRow {
+  const value = row as Record<string, unknown>;
+  return {
+    id: String(value.id),
+    projectId: String(value.project_id),
+    mapId: value.map_id ? String(value.map_id) : null,
+    stableKey: String(value.stable_key),
+    name: String(value.name),
+    path: String(value.path),
+    kind: String(value.kind),
+    description: String(value.description ?? ''),
+    confidence: Number(value.confidence ?? 1),
+    metadata: parseJson(value.metadata_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at)
+  };
+}
+
+function mapCodeReference(row: unknown): CodeReferenceRow {
+  const value = row as Record<string, unknown>;
+  return {
+    id: String(value.id),
+    projectId: String(value.project_id),
+    mapId: value.map_id ? String(value.map_id) : null,
+    featureId: value.feature_id ? String(value.feature_id) : null,
+    entryPointId: value.entry_point_id ? String(value.entry_point_id) : null,
+    stableKey: String(value.stable_key ?? ''),
+    path: String(value.path),
+    symbol: String(value.symbol ?? ''),
+    kind: String(value.kind),
+    description: String(value.description ?? ''),
+    lineStart: nullableNumber(value.line_start),
+    lineEnd: nullableNumber(value.line_end),
     metadata: parseJson(value.metadata_json),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at)
@@ -1119,14 +1822,39 @@ function parseJson(value: unknown): Record<string, unknown> {
     return {};
   }
   try {
-    return JSON.parse(value) as Record<string, unknown>;
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
 }
 
+function parseStringArray(value: unknown): string[] {
+  if (typeof value !== 'string' || !value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function json(value: unknown): string {
   return JSON.stringify(value ?? {});
+}
+
+function jsonArray(value: string[]): string {
+  return JSON.stringify(value);
 }
 
 function changedFieldsFor(existing: Record<string, unknown>, planned: Record<string, unknown>, fields: string[]): string[] {
@@ -1141,11 +1869,18 @@ function alignmentMemberSignature(members: Array<{ targetType: string; targetId:
 }
 
 function appendKeywordClause(where: string[], args: SQLInputValue[], alias: string, columns: string[], keyword: string): void {
-  const value = keyword.trim();
+  const value = keyword.trim().toLowerCase();
   if (!value) return;
-  const pattern = likePattern(value);
-  where.push(`(${columns.map((column) => `LOWER(${alias}.${column}) LIKE ? ESCAPE '\\'`).join(' OR ')})`);
-  args.push(...columns.map(() => pattern));
+  const tokenTerms = unique(value.split(/[.\-_/\s]+/u).filter(Boolean));
+  const fullClause = `(${columns.map((column) => `LOWER(${alias}.${column}) LIKE ? ESCAPE '\\'`).join(' OR ')})`;
+  const tokenClauses = tokenTerms.map((term) => `(${columns.map((column) => `LOWER(${alias}.${column}) LIKE ? ESCAPE '\\'`).join(' OR ')})`);
+  where.push(tokenClauses.length > 1 ? `(${fullClause} OR (${tokenClauses.join(' AND ')}))` : fullClause);
+  args.push(...columns.map(() => likePattern(value)));
+  if (tokenClauses.length > 1) {
+    for (const term of tokenTerms) {
+      args.push(...columns.map(() => likePattern(term)));
+    }
+  }
 }
 
 function likePattern(value: string): string {
@@ -1184,6 +1919,10 @@ function normalizeJson(value: unknown): unknown {
     );
   }
   return value ?? null;
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
 }
 
 function errorInfo(error: unknown): { code: string; message: string; hint: string } {

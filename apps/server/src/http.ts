@@ -1,7 +1,9 @@
 import {
   CreateAlignmentSchema,
+  CreateCodeReferenceSchema,
+  CreateEntryPointSchema,
   CreateFeatureSchema,
-  CreateFeatureSetSchema,
+  CreateMapSchema,
   CreateProjectSchema,
   QueryContextSchema,
   labels
@@ -82,16 +84,28 @@ export function createHttpServer(db: Db): FastifyInstance {
   app.get('/api/projects/:projectId', async (request) => repo.getProject(params(request).projectId));
   app.get('/api/projects/:projectId/tree', async (request) => repo.getProjectTree(params(request).projectId));
 
-  app.get('/api/projects/:projectId/feature-sets', async (request) => repo.listFeatureSets(params(request).projectId));
-  app.post('/api/projects/:projectId/feature-sets', async (request) => {
-    const input = CreateFeatureSetSchema.parse(request.body);
-    return repo.createFeatureSet(params(request).projectId, input);
+  app.get('/api/projects/:projectId/maps', async (request) => repo.listMaps(params(request).projectId));
+  app.post('/api/projects/:projectId/maps', async (request) => {
+    const input = CreateMapSchema.parse(request.body);
+    return repo.createMap(params(request).projectId, input);
   });
 
   app.get('/api/projects/:projectId/features', async (request) => repo.listFeatures(params(request).projectId));
-  app.post('/api/feature-sets/:featureSetId/features', async (request) => {
+  app.post('/api/maps/:mapId/features', async (request) => {
     const input = CreateFeatureSchema.parse(request.body);
-    return repo.createFeature(params(request).featureSetId, input);
+    return repo.createFeature(params(request).mapId, input);
+  });
+
+  app.get('/api/projects/:projectId/entry-points', async (request) => repo.listEntryPoints(params(request).projectId));
+  app.post('/api/projects/:projectId/entry-points', async (request) => {
+    const input = CreateEntryPointSchema.parse(request.body);
+    return repo.createEntryPoint(params(request).projectId, input);
+  });
+
+  app.get('/api/projects/:projectId/code-references', async (request) => repo.listCodeReferences(params(request).projectId));
+  app.post('/api/projects/:projectId/code-references', async (request) => {
+    const input = CreateCodeReferenceSchema.parse(request.body);
+    return repo.createCodeReference(params(request).projectId, input);
   });
 
   app.get('/api/projects/:projectId/alignments', async (request) => repo.listAlignments(params(request).projectId));

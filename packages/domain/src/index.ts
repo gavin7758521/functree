@@ -1,18 +1,10 @@
 import { z } from 'zod';
 
 export const ProjectStatusSchema = z.enum(['active', 'paused', 'archived']);
-export const FeatureSetTypeSchema = z.enum([
-  'frontend',
-  'backend',
-  'product',
-  'uiux',
-  'requirement',
-  'test',
-  'docs',
-  'ops',
-  'other'
-]);
-export const FeatureSetStatusSchema = z.enum(['normal', 'draft', 'frozen', 'archived', 'deprecated']);
+export const MapAxisSchema = z.enum(['capability', 'product', 'web', 'backend', 'sdk', 'ops', 'data', 'test', 'docs', 'other']);
+export const MapScopeSchema = z.enum(['capability', 'implementation', 'contract', 'operation', 'validation', 'documentation', 'data', 'other']);
+export const MapKindSchema = z.enum(['domain', 'app', 'service', 'package', 'module', 'api', 'database', 'deployment', 'test_suite', 'document', 'other']);
+export const MapStatusSchema = z.enum(['normal', 'draft', 'frozen', 'archived', 'deprecated']);
 export const FeatureStatusSchema = z.enum([
   'draft',
   'in_progress',
@@ -33,9 +25,38 @@ export const FeatureKindSchema = z.enum([
   'rule',
   'test',
   'doc',
+  'data',
+  'operation',
   'other'
 ]);
-export const AlignableTypeSchema = z.enum(['project', 'feature_set', 'feature']);
+export const EntryPointKindSchema = z.enum([
+  'app_root',
+  'router',
+  'server_bootstrap',
+  'http_api_root',
+  'cli',
+  'build',
+  'config',
+  'schema',
+  'deployment',
+  'test',
+  'other'
+]);
+export const CodeReferenceKindSchema = z.enum([
+  'file',
+  'class',
+  'function',
+  'component',
+  'api',
+  'route',
+  'table',
+  'migration',
+  'config',
+  'test',
+  'document',
+  'other'
+]);
+export const AlignableTypeSchema = z.enum(['project', 'map', 'feature', 'entry_point', 'code_reference']);
 export const AlignmentRelationSchema = z.enum([
   'corresponds_to',
   'implements',
@@ -50,13 +71,17 @@ export const AlignmentRelationSchema = z.enum([
 ]);
 export const AlignmentStatusSchema = z.enum(['proposed', 'confirmed', 'rejected', 'stale']);
 export const AlignmentRoleSchema = z.enum(['source', 'target', 'peer', 'evidence']);
-export const QueryContextTypeSchema = z.enum(['project', 'feature_set', 'feature', 'alignment']);
+export const QueryContextTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
 
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
-export type FeatureSetType = z.infer<typeof FeatureSetTypeSchema>;
-export type FeatureSetStatus = z.infer<typeof FeatureSetStatusSchema>;
+export type MapAxis = z.infer<typeof MapAxisSchema>;
+export type MapScope = z.infer<typeof MapScopeSchema>;
+export type MapKind = z.infer<typeof MapKindSchema>;
+export type MapStatus = z.infer<typeof MapStatusSchema>;
 export type FeatureStatus = z.infer<typeof FeatureStatusSchema>;
 export type FeatureKind = z.infer<typeof FeatureKindSchema>;
+export type EntryPointKind = z.infer<typeof EntryPointKindSchema>;
+export type CodeReferenceKind = z.infer<typeof CodeReferenceKindSchema>;
 export type AlignableType = z.infer<typeof AlignableTypeSchema>;
 export type AlignmentRelation = z.infer<typeof AlignmentRelationSchema>;
 export type AlignmentStatus = z.infer<typeof AlignmentStatusSchema>;
@@ -71,10 +96,13 @@ const IdSchema = z
 
 const TextSchema = z.string().trim().min(1).max(200);
 const OptionalTextSchema = z.string().trim().max(4000).optional().default('');
+const OptionalShortTextSchema = z.string().trim().max(200).optional().default('');
 const VersionSchema = z.string().trim().min(1).max(80).default('当前');
 const MetadataSchema = z.record(z.string(), z.unknown()).optional().default({});
+const TagsSchema = z.array(z.string().trim().min(1).max(60)).max(40).optional().default([]);
 export const QUERY_CONTEXT_MAX_LIMIT = 200;
-const StableKeySchema = z.string().trim().min(1).max(160);
+const StableKeySchema = z.string().trim().min(1).max(180);
+const PathSchema = z.string().trim().min(1).max(600);
 const DryRunSchema = z.boolean().optional().default(false);
 
 export const CreateProjectSchema = z.object({
@@ -88,34 +116,38 @@ export const CreateProjectSchema = z.object({
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().omit({ id: true });
 
-export const CreateFeatureSetSchema = z.object({
+export const CreateMapSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
-  stableKey: StableKeySchema.optional(),
+  stableKey: StableKeySchema,
   name: TextSchema,
   version: VersionSchema,
-  type: FeatureSetTypeSchema,
-  status: FeatureSetStatusSchema.default('normal'),
+  axis: MapAxisSchema,
+  scope: MapScopeSchema,
+  kind: MapKindSchema,
+  status: MapStatusSchema.default('normal'),
   description: OptionalTextSchema,
-  owner: z.string().trim().max(120).optional().default(''),
+  owner: OptionalShortTextSchema,
+  tags: TagsSchema,
   metadata: MetadataSchema,
   dryRun: DryRunSchema
 });
 
-export const UpdateFeatureSetSchema = CreateFeatureSetSchema.partial().omit({ id: true, projectId: true, dryRun: true });
+export const UpdateMapSchema = CreateMapSchema.partial().omit({ id: true, projectId: true, dryRun: true });
 
 export const CreateFeatureSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
-  featureSetId: IdSchema.optional(),
+  mapId: IdSchema.optional(),
   parentFeatureId: IdSchema.nullable().optional().default(null),
-  stableKey: z.string().trim().min(1).max(120),
+  stableKey: StableKeySchema,
   name: TextSchema,
   version: VersionSchema,
   status: FeatureStatusSchema.default('draft'),
   kind: FeatureKindSchema.default('capability'),
   description: OptionalTextSchema,
   sortOrder: z.number().int().min(0).max(100000).optional().default(0),
+  tags: TagsSchema,
   metadata: MetadataSchema,
   dryRun: DryRunSchema
 });
@@ -123,9 +155,44 @@ export const CreateFeatureSchema = z.object({
 export const UpdateFeatureSchema = CreateFeatureSchema.partial().omit({
   id: true,
   projectId: true,
-  featureSetId: true,
+  mapId: true,
   dryRun: true
 });
+
+export const CreateEntryPointSchema = z.object({
+  id: IdSchema.optional(),
+  projectId: IdSchema.optional(),
+  mapId: IdSchema.optional(),
+  stableKey: StableKeySchema,
+  name: TextSchema,
+  path: PathSchema,
+  kind: EntryPointKindSchema,
+  description: OptionalTextSchema,
+  confidence: z.number().min(0).max(1).optional().default(1),
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
+});
+
+export const UpdateEntryPointSchema = CreateEntryPointSchema.partial().omit({ id: true, projectId: true, dryRun: true });
+
+export const CreateCodeReferenceSchema = z.object({
+  id: IdSchema.optional(),
+  projectId: IdSchema.optional(),
+  mapId: IdSchema.optional(),
+  featureId: IdSchema.optional(),
+  entryPointId: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
+  path: PathSchema,
+  symbol: OptionalShortTextSchema,
+  kind: CodeReferenceKindSchema,
+  description: OptionalTextSchema,
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional().default(null),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional().default(null),
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
+});
+
+export const UpdateCodeReferenceSchema = CreateCodeReferenceSchema.partial().omit({ id: true, projectId: true, dryRun: true });
 
 export const AlignmentMemberSchema = z.object({
   targetType: AlignableTypeSchema,
@@ -152,26 +219,41 @@ export const UpdateAlignmentSchema = CreateAlignmentSchema.partial().omit({ id: 
 export const QueryContextSchema = z.object({
   projectId: IdSchema.optional(),
   keyword: z.string().trim().max(120).optional().default(''),
-  types: z.array(QueryContextTypeSchema).min(1).max(4).optional(),
-  featureSetId: IdSchema.optional(),
-  stableKey: z.string().trim().min(1).max(160).optional(),
+  types: z.array(QueryContextTypeSchema).min(1).max(6).optional(),
+  mapId: IdSchema.optional(),
+  stableKey: z.string().trim().min(1).max(180).optional(),
   alignmentId: IdSchema.optional(),
   parentFeatureId: IdSchema.nullable().optional(),
+  entryPointId: IdSchema.optional(),
+  codeReferenceId: IdSchema.optional(),
+  path: z.string().trim().min(1).max(600).optional(),
   limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().default(20),
   offset: z.number().int().min(0).max(100000).optional().default(0),
   cursor: z.string().trim().max(40).optional()
 });
 
-export const BatchFeatureSetSchema = z.object({
+export const BatchMapSchema = z.object({
   projectId: IdSchema,
   dryRun: DryRunSchema,
-  items: z.array(CreateFeatureSetSchema.omit({ projectId: true, dryRun: true })).min(1).max(100)
+  items: z.array(CreateMapSchema.omit({ projectId: true, dryRun: true })).min(1).max(100)
 });
 
 export const BatchFeatureSchema = z.object({
-  featureSetId: IdSchema,
+  mapId: IdSchema,
   dryRun: DryRunSchema,
-  items: z.array(CreateFeatureSchema.omit({ projectId: true, featureSetId: true, dryRun: true })).min(1).max(300)
+  items: z.array(CreateFeatureSchema.omit({ projectId: true, mapId: true, dryRun: true })).min(1).max(300)
+});
+
+export const BatchEntryPointSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateEntryPointSchema.omit({ projectId: true, dryRun: true })).min(1).max(200)
+});
+
+export const BatchCodeReferenceSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateCodeReferenceSchema.omit({ projectId: true, dryRun: true })).min(1).max(500)
 });
 
 export const BatchAlignmentSchema = z.object({
@@ -181,12 +263,16 @@ export const BatchAlignmentSchema = z.object({
 });
 
 export type CreateProjectInput = z.input<typeof CreateProjectSchema>;
-export type CreateFeatureSetInput = z.input<typeof CreateFeatureSetSchema>;
+export type CreateMapInput = z.input<typeof CreateMapSchema>;
 export type CreateFeatureInput = z.input<typeof CreateFeatureSchema>;
+export type CreateEntryPointInput = z.input<typeof CreateEntryPointSchema>;
+export type CreateCodeReferenceInput = z.input<typeof CreateCodeReferenceSchema>;
 export type CreateAlignmentInput = z.input<typeof CreateAlignmentSchema>;
 export type QueryContextInput = z.input<typeof QueryContextSchema>;
-export type BatchFeatureSetInput = z.input<typeof BatchFeatureSetSchema>;
+export type BatchMapInput = z.input<typeof BatchMapSchema>;
 export type BatchFeatureInput = z.input<typeof BatchFeatureSchema>;
+export type BatchEntryPointInput = z.input<typeof BatchEntryPointSchema>;
+export type BatchCodeReferenceInput = z.input<typeof BatchCodeReferenceSchema>;
 export type BatchAlignmentInput = z.input<typeof BatchAlignmentSchema>;
 
 export const labels = {
@@ -195,24 +281,48 @@ export const labels = {
     paused: '暂停',
     archived: '归档'
   } satisfies Record<ProjectStatus, string>,
-  featureSetType: {
-    frontend: '前端',
-    backend: '后端',
+  mapAxis: {
+    capability: '业务能力',
     product: '产品',
-    uiux: 'UI/UX',
-    requirement: '需求',
+    web: '前端',
+    backend: '后端',
+    sdk: 'SDK',
+    ops: '运维',
+    data: '数据',
     test: '测试',
     docs: '文档',
-    ops: '运维',
     other: '其他'
-  } satisfies Record<FeatureSetType, string>,
-  featureSetStatus: {
+  } satisfies Record<MapAxis, string>,
+  mapScope: {
+    capability: '能力',
+    implementation: '实现',
+    contract: '契约',
+    operation: '运维',
+    validation: '验证',
+    documentation: '文档',
+    data: '数据',
+    other: '其他'
+  } satisfies Record<MapScope, string>,
+  mapKind: {
+    domain: '领域',
+    app: '应用',
+    service: '服务',
+    package: '包',
+    module: '模块',
+    api: 'API',
+    database: '数据库',
+    deployment: '部署',
+    test_suite: '测试集',
+    document: '文档',
+    other: '其他'
+  } satisfies Record<MapKind, string>,
+  mapStatus: {
     normal: '正常',
     draft: '草稿',
     frozen: '冻结',
     archived: '归档',
     deprecated: '废弃'
-  } satisfies Record<FeatureSetStatus, string>,
+  } satisfies Record<MapStatus, string>,
   featureStatus: {
     draft: '草稿',
     in_progress: '进行中',
@@ -223,6 +333,33 @@ export const labels = {
     deprecated: '已废弃',
     blocked: '阻塞中'
   } satisfies Record<FeatureStatus, string>,
+  entryPointKind: {
+    app_root: '应用入口',
+    router: '路由入口',
+    server_bootstrap: '服务启动',
+    http_api_root: 'HTTP API 入口',
+    cli: 'CLI',
+    build: '构建',
+    config: '配置',
+    schema: 'Schema',
+    deployment: '部署',
+    test: '测试',
+    other: '其他'
+  } satisfies Record<EntryPointKind, string>,
+  codeReferenceKind: {
+    file: '文件',
+    class: '类',
+    function: '函数',
+    component: '组件',
+    api: 'API',
+    route: '路由',
+    table: '表',
+    migration: '迁移',
+    config: '配置',
+    test: '测试',
+    document: '文档',
+    other: '其他'
+  } satisfies Record<CodeReferenceKind, string>,
   alignmentRelation: {
     corresponds_to: '对应',
     implements: '实现',
@@ -245,5 +382,5 @@ export const labels = {
 
 export function newId(prefix: string): string {
   const random = Math.random().toString(36).slice(2, 8);
-  return `${prefix}_${Date.now().toString(36)}_${random}`;
+  return `${prefix}_${Date.now().toString(36).slice(2)}_${random}`;
 }

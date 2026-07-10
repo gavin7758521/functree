@@ -1,0 +1,11 @@
+{
+  "projectId": "proj_chat",
+  "stableKey": "web.chat-ui",
+  "name": "Web 聊天界面",
+  "version": "当前",
+  "axis": "web",
+  "scope": "implementation",
+  "kind": "app",
+  "status": "normal",
+  "tags": ["chat", "react"]
+}

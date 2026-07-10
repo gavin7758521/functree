@@ -1,17 +1,22 @@
 {
-  "stableKey": "login.web-to-requirement",
-  "name": "登录链路对齐",
+  "projectId": "proj_chat",
+  "stableKey": "chat.send-message.cross-layer",
+  "name": "发送消息链路对齐",
   "relation": "corresponds_to",
   "status": "proposed",
   "members": [
     {
-      "targetType": "feature",
-      "targetId": "feat_req_login",
+      "targetType": "map",
+      "targetId": "map_product_chat",
       "role": "source"
     },
     {
       "targetType": "feature",
-      "targetId": "feat_app_login",
+      "targetId": "feat_send_message"
+    },
+    {
+      "targetType": "code_reference",
+      "targetId": "ref_composer",
       "role": "target"
     }
   ]

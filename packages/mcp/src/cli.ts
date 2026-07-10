@@ -8,12 +8,16 @@ const DEFAULT_SERVER_URL = 'http://127.0.0.1:4174';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const QUERY_CONTEXT_MAX_LIMIT = 200;
 
-const projectStatus = ['active', 'paused', 'archived'] as const;
-const featureSetTypes = ['frontend', 'backend', 'product', 'uiux', 'requirement', 'test', 'docs', 'ops', 'other'] as const;
-const featureSetStatuses = ['normal', 'draft', 'frozen', 'archived', 'deprecated'] as const;
+const projectStatuses = ['active', 'paused', 'archived'] as const;
+const mapAxes = ['capability', 'product', 'web', 'backend', 'sdk', 'ops', 'data', 'test', 'docs', 'other'] as const;
+const mapScopes = ['capability', 'implementation', 'contract', 'operation', 'validation', 'documentation', 'data', 'other'] as const;
+const mapKinds = ['domain', 'app', 'service', 'package', 'module', 'api', 'database', 'deployment', 'test_suite', 'document', 'other'] as const;
+const mapStatuses = ['normal', 'draft', 'frozen', 'archived', 'deprecated'] as const;
 const featureStatuses = ['draft', 'in_progress', 'reviewing', 'completed', 'released', 'archived', 'deprecated', 'blocked'] as const;
-const featureKinds = ['capability', 'module', 'page', 'api', 'component', 'process', 'rule', 'test', 'doc', 'other'] as const;
-const alignableTypes = ['project', 'feature_set', 'feature'] as const;
+const featureKinds = ['capability', 'module', 'page', 'api', 'component', 'process', 'rule', 'test', 'doc', 'data', 'operation', 'other'] as const;
+const entryPointKinds = ['app_root', 'router', 'server_bootstrap', 'http_api_root', 'cli', 'build', 'config', 'schema', 'deployment', 'test', 'other'] as const;
+const codeReferenceKinds = ['file', 'class', 'function', 'component', 'api', 'route', 'table', 'migration', 'config', 'test', 'document', 'other'] as const;
+const alignableTypes = ['project', 'map', 'feature', 'entry_point', 'code_reference'] as const;
 const alignmentRelations = [
   'corresponds_to',
   'implements',
@@ -28,7 +32,7 @@ const alignmentRelations = [
 ] as const;
 const alignmentStatuses = ['proposed', 'confirmed', 'rejected', 'stale'] as const;
 const alignmentRoles = ['source', 'target', 'peer', 'evidence'] as const;
-const queryContextTypes = ['project', 'feature_set', 'feature', 'alignment'] as const;
+const queryContextTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
 
 type Config = {
   serverUrl: string;
@@ -36,6 +40,7 @@ type Config = {
 };
 
 const metadataSchema = z.record(z.string(), z.unknown()).optional().describe('Optional JSON metadata forwarded to FuncTree.');
+const tagsSchema = z.array(z.string().min(1).max(60)).max(40).optional().describe('Optional tags for secondary grouping, not primary frontend/backend classification.');
 const dryRunSchema = z.boolean().optional().describe('When true, return the planned operation and changed fields without writing data.');
 const alignmentMemberSchema = z.object({
   targetType: z.enum(alignableTypes).describe('Type of aligned object.'),
@@ -44,28 +49,59 @@ const alignmentMemberSchema = z.object({
   note: z.string().optional().describe('Optional member-specific note.')
 });
 
-const featureSetItemShape = {
-  id: z.string().optional().describe('Optional concrete feature set ID. If omitted, FuncTree generates one.'),
-  stableKey: z.string().optional().describe('Long-lived semantic key, for example backend.homeserver or web.frontend.'),
-  name: z.string().describe('Feature set name, for example App frontend or Auth service.'),
-  version: z.string().describe('Feature set version, release, or snapshot label.'),
-  type: z.enum(featureSetTypes).describe('Feature set category.'),
-  status: z.enum(featureSetStatuses).optional().describe('Feature set lifecycle status. Defaults to normal.'),
-  description: z.string().optional().describe('Human-readable feature set summary.'),
-  owner: z.string().optional().describe('Team, role, or person responsible for this feature set.'),
+const mapItemShape = {
+  id: z.string().optional().describe('Optional concrete map ID. If omitted, FuncTree generates one.'),
+  stableKey: z.string().describe('Long-lived map key, for example product.chat, web.chat-ui, backend.matrix-chat-core, sdk.public-user-sdk, or ops.deployment.'),
+  name: z.string().describe('Map display name, for example Chat product capability or Matrix backend core.'),
+  version: z.string().optional().describe('Map version, release, or snapshot label. Defaults to 当前.'),
+  axis: z.enum(mapAxes).describe('Primary axis. Use this instead of tags for product/web/backend/sdk/ops classification.'),
+  scope: z.enum(mapScopes).describe('Scope of the map, such as capability, implementation, contract, operation, validation, documentation, or data.'),
+  kind: z.enum(mapKinds).describe('Concrete map kind, such as domain, app, service, package, module, api, database, deployment, test_suite, or document.'),
+  status: z.enum(mapStatuses).optional().describe('Map lifecycle status. Defaults to normal.'),
+  description: z.string().optional().describe('Human-readable map summary.'),
+  owner: z.string().optional().describe('Team, role, or person responsible for this map.'),
+  tags: tagsSchema,
   metadata: metadataSchema
 };
 
 const featureItemShape = {
   id: z.string().optional().describe('Optional concrete feature object ID. If omitted, FuncTree generates one.'),
   parentFeatureId: z.string().nullable().optional().describe('Optional parent feature ID for child features.'),
-  stableKey: z.string().describe('Long-lived semantic key, for example login or checkout.payment.'),
+  stableKey: z.string().describe('Long-lived feature key inside the map, for example send-message or timeline.sync.'),
   name: z.string().describe('Feature display name.'),
   version: z.string().optional().describe('Feature version or release label. Defaults to 当前.'),
   status: z.enum(featureStatuses).optional().describe('Feature lifecycle status. Defaults to draft.'),
   kind: z.enum(featureKinds).optional().describe('Feature kind. Defaults to capability.'),
   description: z.string().optional().describe('Human-readable feature summary.'),
   sortOrder: z.number().int().min(0).max(100000).optional().describe('Optional sibling ordering value.'),
+  tags: tagsSchema,
+  metadata: metadataSchema
+};
+
+const entryPointItemShape = {
+  id: z.string().optional().describe('Optional concrete entry point ID. If omitted, FuncTree generates one.'),
+  mapId: z.string().optional().describe('Optional map ID this entry point belongs to.'),
+  stableKey: z.string().describe('Long-lived entry point key, for example web.app-root, backend.server-bootstrap, or ops.deploy-config.'),
+  name: z.string().describe('Entry point display name.'),
+  path: z.string().describe('Repository path or config path used as an analysis starting point.'),
+  kind: z.enum(entryPointKinds).describe('Entry point kind.'),
+  description: z.string().optional().describe('Why this file/config is an entry point.'),
+  confidence: z.number().min(0).max(1).optional().describe('Confidence score from 0 to 1. Defaults to 1.'),
+  metadata: metadataSchema
+};
+
+const codeReferenceItemShape = {
+  id: z.string().optional().describe('Optional concrete code reference ID. If omitted, FuncTree generates one.'),
+  mapId: z.string().optional().describe('Optional map ID this reference belongs to.'),
+  featureId: z.string().optional().describe('Optional feature ID this reference implements or documents.'),
+  entryPointId: z.string().optional().describe('Optional entry point ID this reference is discovered from.'),
+  stableKey: z.string().optional().describe('Optional long-lived reference key. If omitted, FuncTree de-duplicates by project, path, symbol, kind, and ownership.'),
+  path: z.string().describe('Repository file path or document path.'),
+  symbol: z.string().optional().describe('Optional symbol, route, table, component, function, class, or section name.'),
+  kind: z.enum(codeReferenceKinds).describe('Reference kind.'),
+  description: z.string().optional().describe('Human-readable reason this code reference matters.'),
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based start line.'),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based end line.'),
   metadata: metadataSchema
 };
 
@@ -90,14 +126,18 @@ const server = new McpServer(
   {
     instructions: [
       'FuncTree is a remote feature knowledge-base service for software projects.',
-      'Use it to record and query projects, feature sets, features, child features, versions, and cross-level alignment relationships.',
-      'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not read local repositories or store business data.',
-      'Use functree_query_context before writing when IDs, stableKeys, existing feature sets, features, or alignments are uncertain.',
-      'functree_query_context is read-only and supports keyword, types, stableKey, featureSetId, alignmentId, parentFeatureId, offset, and cursor filters.',
+      'Use it after analyzing a repository to record Project -> Map -> Feature structure, important entry points, code references, and cross-layer alignments.',
+      'Maps are first-class views such as product.chat, web.chat-ui, backend.matrix-chat-core, sdk.public-user-sdk, or ops.deployment.',
+      'Use map axis/scope/kind for primary classification. Tags are only secondary labels.',
+      'Entry points tell future agents where project analysis should start. A project can have multiple entry points across frontend, backend, CLI, config, schema, deployment, and test surfaces.',
+      'Code references connect features and maps to concrete files, symbols, routes, tables, migrations, configs, tests, or documents.',
+      'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not store business data.',
+      'Use functree_query_context before writing when IDs, stableKeys, existing maps, features, entry points, code references, or alignments are uncertain.',
+      'functree_query_context is read-only and supports keyword, types, stableKey, mapId, alignmentId, parentFeatureId, entryPointId, codeReferenceId, path, offset, and cursor filters.',
       'Write tools return operation, changedFields, data, and dryRun. operation is created, updated, unchanged, or dry_run.',
-      'Use dryRun: true before large syncs to preview diffs. Use batch tools for bulk feature sets, features, or alignments.',
-      'Alignment upsert de-duplicates by id, stableKey, or member set, so repeated frontend/backend relationship writes should update instead of duplicating.',
-      'stableKey should be a long-lived semantic key such as backend.bots, web.frontend, login, or checkout.payment; id identifies a concrete FuncTree object instance.',
+      'Use dryRun: true before large syncs to preview diffs. Use batch tools for bulk maps, features, entry points, code references, or alignments.',
+      'Alignment upsert de-duplicates by id, stableKey, or member set, so repeated product/frontend/backend relationships should update instead of duplicating.',
+      'stableKey should be a long-lived semantic key. id identifies a concrete FuncTree object instance.',
       'The create/upsert tools mutate the central FuncTree server and should normally require user approval.'
     ].join('\n')
   }
@@ -112,7 +152,7 @@ server.registerTool(
     inputSchema: {
       id: z.string().optional().describe('Optional stable project ID. If omitted, FuncTree generates one.'),
       name: z.string().describe('Project name shown in the FuncTree console.'),
-      status: z.enum(projectStatus).optional().describe('Project lifecycle status. Defaults to active.'),
+      status: z.enum(projectStatuses).optional().describe('Project lifecycle status. Defaults to active.'),
       currentVersion: z.string().optional().describe('Current project version or release label. Defaults to 当前.'),
       description: z.string().optional().describe('Human-readable project summary.'),
       metadata: metadataSchema
@@ -128,14 +168,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  'functree_upsert_feature_set',
+  'functree_upsert_map',
   {
-    title: 'Create or update feature set',
+    title: 'Create or update FuncTree map',
     description:
-      'Create or update a versioned feature set under a FuncTree project. Upserts by id or stableKey and returns operation plus changedFields.',
+      'Create or update a project map. Upserts by id or stableKey and returns operation plus changedFields.',
     inputSchema: {
-      ...featureSetItemShape,
-      projectId: z.string().describe('ID of the project that owns this feature set.'),
+      ...mapItemShape,
+      projectId: z.string().describe('ID of the project that owns this map.'),
       dryRun: dryRunSchema
     },
     annotations: {
@@ -145,7 +185,7 @@ server.registerTool(
       openWorldHint: true
     }
   },
-  async (args) => textResult(await callHttpTool(config, 'functree_upsert_feature_set', args))
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_map', args))
 );
 
 server.registerTool(
@@ -153,10 +193,10 @@ server.registerTool(
   {
     title: 'Create or update feature',
     description:
-      'Create or update a feature inside a feature set. Upserts by id or stableKey+version and returns operation plus changedFields.',
+      'Create or update a feature inside a FuncTree map. Upserts by id or stableKey+version and returns operation plus changedFields.',
     inputSchema: {
       ...featureItemShape,
-      featureSetId: z.string().describe('ID of the feature set that owns this feature.'),
+      mapId: z.string().describe('ID of the map that owns this feature.'),
       dryRun: dryRunSchema
     },
     annotations: {
@@ -170,11 +210,53 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_upsert_entry_point',
+  {
+    title: 'Create or update entry point',
+    description:
+      'Create or update a repository analysis entry point such as app root, router, server bootstrap, API root, CLI, config, schema, deployment, or test entry.',
+    inputSchema: {
+      ...entryPointItemShape,
+      projectId: z.string().describe('ID of the project that owns this entry point.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_entry_point', args))
+);
+
+server.registerTool(
+  'functree_upsert_code_reference',
+  {
+    title: 'Create or update code reference',
+    description:
+      'Create or update a concrete code reference for a map, feature, or entry point. Upserts by id, stableKey, or path signature.',
+    inputSchema: {
+      ...codeReferenceItemShape,
+      projectId: z.string().describe('ID of the project that owns this code reference.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_code_reference', args))
+);
+
+server.registerTool(
   'functree_upsert_alignment',
   {
     title: 'Create or update alignment relation',
     description:
-      'Create or update a cross-level alignment relation. Upserts by id, stableKey, or member set to avoid duplicate frontend/backend/product/test relationships.',
+      'Create or update a cross-layer alignment relation. Upserts by id, stableKey, or member set to avoid duplicate product/frontend/backend/sdk/test relationships.',
     inputSchema: {
       ...alignmentItemShape,
       projectId: z.string().describe('ID of the project that owns the alignment.'),
@@ -191,15 +273,15 @@ server.registerTool(
 );
 
 server.registerTool(
-  'functree_upsert_feature_sets_batch',
+  'functree_upsert_maps_batch',
   {
-    title: 'Batch upsert feature sets',
+    title: 'Batch upsert maps',
     description:
-      'Batch upsert feature sets under one project. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+      'Batch upsert maps under one project. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
     inputSchema: {
-      projectId: z.string().describe('ID of the project that owns all feature sets in this batch.'),
+      projectId: z.string().describe('ID of the project that owns all maps in this batch.'),
       dryRun: dryRunSchema,
-      items: z.array(z.object(featureSetItemShape)).min(1).max(100).describe('Feature sets to upsert.')
+      items: z.array(z.object(mapItemShape)).min(1).max(100).describe('Maps to upsert.')
     },
     annotations: {
       readOnlyHint: false,
@@ -208,7 +290,7 @@ server.registerTool(
       openWorldHint: true
     }
   },
-  async (args) => textResult(await callHttpTool(config, 'functree_upsert_feature_sets_batch', args))
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_maps_batch', args))
 );
 
 server.registerTool(
@@ -216,9 +298,9 @@ server.registerTool(
   {
     title: 'Batch upsert features',
     description:
-      'Batch upsert features under one feature set. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+      'Batch upsert features under one map. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
     inputSchema: {
-      featureSetId: z.string().describe('ID of the feature set that owns all features in this batch.'),
+      mapId: z.string().describe('ID of the map that owns all features in this batch.'),
       dryRun: dryRunSchema,
       items: z.array(z.object(featureItemShape)).min(1).max(300).describe('Features to upsert.')
     },
@@ -230,6 +312,48 @@ server.registerTool(
     }
   },
   async (args) => textResult(await callHttpTool(config, 'functree_upsert_features_batch', args))
+);
+
+server.registerTool(
+  'functree_upsert_entry_points_batch',
+  {
+    title: 'Batch upsert entry points',
+    description:
+      'Batch upsert entry points under one project. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all entry points in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(entryPointItemShape)).min(1).max(200).describe('Entry points to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_entry_points_batch', args))
+);
+
+server.registerTool(
+  'functree_upsert_code_references_batch',
+  {
+    title: 'Batch upsert code references',
+    description:
+      'Batch upsert code references under one project. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all code references in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(codeReferenceItemShape)).min(1).max(500).describe('Code references to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_code_references_batch', args))
 );
 
 server.registerTool(
@@ -258,18 +382,21 @@ server.registerTool(
   {
     title: 'Query FuncTree context',
     description:
-      'Read project, feature set, feature, and alignment context from FuncTree. Use before writing when IDs, stableKeys, or existing relationships are uncertain.',
+      'Read project, map, feature, entry point, code reference, and alignment context from FuncTree. Use before writing when IDs, stableKeys, or existing relationships are uncertain.',
     inputSchema: {
       projectId: z.string().optional().describe('Optional project ID. When omitted, can return project overview context.'),
       keyword: z
         .string()
         .optional()
-        .describe('Optional keyword matched against names, descriptions, versions, stableKeys, and IDs. Supports dot and hyphen fragments.'),
-      types: z.array(z.enum(queryContextTypes)).min(1).max(4).optional().describe('Object types to return, for example ["feature"].'),
-      featureSetId: z.string().optional().describe('Filter feature sets, features, or related alignments by feature set ID.'),
-      stableKey: z.string().optional().describe('Exact stableKey filter for feature sets, features, or alignments.'),
+        .describe('Optional keyword matched against names, descriptions, versions, stableKeys, IDs, paths, and symbols. Supports dot and hyphen fragments.'),
+      types: z.array(z.enum(queryContextTypes)).min(1).max(6).optional().describe('Object types to return, for example ["feature"] or ["entry_point"].'),
+      mapId: z.string().optional().describe('Filter maps, features, entry points, code references, or related alignments by map ID.'),
+      stableKey: z.string().optional().describe('Exact stableKey filter for maps, features, entry points, code references, or alignments.'),
       alignmentId: z.string().optional().describe('Filter alignments or alignment members by alignment ID.'),
       parentFeatureId: z.string().nullable().optional().describe('Filter features by parent feature ID. Use null for root features.'),
+      entryPointId: z.string().optional().describe('Filter entry points, code references, features, or alignments by entry point ID.'),
+      codeReferenceId: z.string().optional().describe('Filter code references, owning objects, or alignments by code reference ID.'),
+      path: z.string().optional().describe('Filter entry points or code references by path fragment.'),
       limit: z
         .number()
         .int()
@@ -420,14 +547,12 @@ function parsePositiveInt(value: string | undefined, fallback: number, label: st
   return parsed;
 }
 
-function formatHttpError(body: string): string {
+function formatHttpError(value: string): string {
   try {
-    const parsed = JSON.parse(body) as { code?: string; message?: string; hint?: string; requestId?: string };
-    return [parsed.code, parsed.message, parsed.hint ? `hint=${parsed.hint}` : '', parsed.requestId ? `requestId=${parsed.requestId}` : '']
-      .filter(Boolean)
-      .join(' ');
+    const parsed = JSON.parse(value) as { code?: string; message?: string; hint?: string; requestId?: string };
+    return [parsed.code, parsed.message, parsed.hint, parsed.requestId ? `requestId=${parsed.requestId}` : ''].filter(Boolean).join(' ');
   } catch {
-    return body;
+    return value;
   }
 }
 
@@ -435,14 +560,12 @@ function printHelp(): void {
   console.log(`FuncTree MCP adapter ${VERSION}
 
 Usage:
-  functree-mcp [--server-url <url>] [--timeout-ms <ms>]
+  functree-mcp --server-url http://192.168.124.82:4174
 
-Environment:
-  FUNCTREE_SERVER_URL   FuncTree HTTP server URL. Default: ${DEFAULT_SERVER_URL}
-  FUNCTREE_TIMEOUT_MS   HTTP request timeout in milliseconds. Default: ${DEFAULT_TIMEOUT_MS}
-
-Examples:
-  functree-mcp --server-url http://<functree-server>:4174
-  FUNCTREE_SERVER_URL=http://<functree-server>:4174 functree-mcp
+Options:
+  --server-url <url>   FuncTree HTTP server URL. Defaults to FUNCTREE_SERVER_URL or ${DEFAULT_SERVER_URL}
+  --timeout-ms <ms>    HTTP request timeout. Defaults to ${DEFAULT_TIMEOUT_MS}
+  --version, -v        Print version
+  --help, -h           Print help
 `);
 }
