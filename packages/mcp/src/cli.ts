@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const VERSION = '0.1.1';
+const VERSION = '0.2.0';
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:4174';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const QUERY_CONTEXT_MAX_LIMIT = 200;
@@ -28,10 +28,56 @@ const alignmentRelations = [
 ] as const;
 const alignmentStatuses = ['proposed', 'confirmed', 'rejected', 'stale'] as const;
 const alignmentRoles = ['source', 'target', 'peer', 'evidence'] as const;
+const queryContextTypes = ['project', 'feature_set', 'feature', 'alignment'] as const;
 
 type Config = {
   serverUrl: string;
   timeoutMs: number;
+};
+
+const metadataSchema = z.record(z.string(), z.unknown()).optional().describe('Optional JSON metadata forwarded to FuncTree.');
+const dryRunSchema = z.boolean().optional().describe('When true, return the planned operation and changed fields without writing data.');
+const alignmentMemberSchema = z.object({
+  targetType: z.enum(alignableTypes).describe('Type of aligned object.'),
+  targetId: z.string().describe('ID of the aligned object.'),
+  role: z.enum(alignmentRoles).optional().describe('Role of this member in the alignment. Defaults to peer.'),
+  note: z.string().optional().describe('Optional member-specific note.')
+});
+
+const featureSetItemShape = {
+  id: z.string().optional().describe('Optional concrete feature set ID. If omitted, FuncTree generates one.'),
+  stableKey: z.string().optional().describe('Long-lived semantic key, for example backend.homeserver or web.frontend.'),
+  name: z.string().describe('Feature set name, for example App frontend or Auth service.'),
+  version: z.string().describe('Feature set version, release, or snapshot label.'),
+  type: z.enum(featureSetTypes).describe('Feature set category.'),
+  status: z.enum(featureSetStatuses).optional().describe('Feature set lifecycle status. Defaults to normal.'),
+  description: z.string().optional().describe('Human-readable feature set summary.'),
+  owner: z.string().optional().describe('Team, role, or person responsible for this feature set.'),
+  metadata: metadataSchema
+};
+
+const featureItemShape = {
+  id: z.string().optional().describe('Optional concrete feature object ID. If omitted, FuncTree generates one.'),
+  parentFeatureId: z.string().nullable().optional().describe('Optional parent feature ID for child features.'),
+  stableKey: z.string().describe('Long-lived semantic key, for example login or checkout.payment.'),
+  name: z.string().describe('Feature display name.'),
+  version: z.string().optional().describe('Feature version or release label. Defaults to 当前.'),
+  status: z.enum(featureStatuses).optional().describe('Feature lifecycle status. Defaults to draft.'),
+  kind: z.enum(featureKinds).optional().describe('Feature kind. Defaults to capability.'),
+  description: z.string().optional().describe('Human-readable feature summary.'),
+  sortOrder: z.number().int().min(0).max(100000).optional().describe('Optional sibling ordering value.'),
+  metadata: metadataSchema
+};
+
+const alignmentItemShape = {
+  id: z.string().optional().describe('Optional alignment ID. If omitted, FuncTree generates one.'),
+  stableKey: z.string().optional().describe('Optional long-lived semantic key for this alignment.'),
+  name: z.string().describe('Alignment name shown in FuncTree.'),
+  relation: z.enum(alignmentRelations).optional().describe('Semantic relationship type. Defaults to corresponds_to.'),
+  status: z.enum(alignmentStatuses).optional().describe('Alignment review status. Defaults to proposed.'),
+  description: z.string().optional().describe('Human-readable alignment rationale.'),
+  members: z.array(alignmentMemberSchema).min(2).describe('Two or more objects to align. All members must belong to the same FuncTree project.'),
+  metadata: metadataSchema
 };
 
 const config = readConfig(process.argv.slice(2), process.env);
@@ -46,9 +92,13 @@ const server = new McpServer(
       'FuncTree is a remote feature knowledge-base service for software projects.',
       'Use it to record and query projects, feature sets, features, child features, versions, and cross-level alignment relationships.',
       'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not read local repositories or store business data.',
-      'Use functree_query_context before writing when project IDs, feature set IDs, feature IDs, or existing alignments are uncertain.',
-      'The create/upsert tools mutate the central FuncTree server and should normally require user approval. functree_query_context is read-only.',
-      'stableKey should be a long-lived semantic key such as login or checkout.payment; id identifies a concrete FuncTree object instance.'
+      'Use functree_query_context before writing when IDs, stableKeys, existing feature sets, features, or alignments are uncertain.',
+      'functree_query_context is read-only and supports keyword, types, stableKey, featureSetId, alignmentId, parentFeatureId, offset, and cursor filters.',
+      'Write tools return operation, changedFields, data, and dryRun. operation is created, updated, unchanged, or dry_run.',
+      'Use dryRun: true before large syncs to preview diffs. Use batch tools for bulk feature sets, features, or alignments.',
+      'Alignment upsert de-duplicates by id, stableKey, or member set, so repeated frontend/backend relationship writes should update instead of duplicating.',
+      'stableKey should be a long-lived semantic key such as backend.bots, web.frontend, login, or checkout.payment; id identifies a concrete FuncTree object instance.',
+      'The create/upsert tools mutate the central FuncTree server and should normally require user approval.'
     ].join('\n')
   }
 );
@@ -64,7 +114,8 @@ server.registerTool(
       name: z.string().describe('Project name shown in the FuncTree console.'),
       status: z.enum(projectStatus).optional().describe('Project lifecycle status. Defaults to active.'),
       currentVersion: z.string().optional().describe('Current project version or release label. Defaults to 当前.'),
-      description: z.string().optional().describe('Human-readable project summary.')
+      description: z.string().optional().describe('Human-readable project summary.'),
+      metadata: metadataSchema
     },
     annotations: {
       readOnlyHint: false,
@@ -81,21 +132,16 @@ server.registerTool(
   {
     title: 'Create or update feature set',
     description:
-      'Create or update a versioned feature set under a FuncTree project, such as frontend, backend, product requirements, UI/UX, tests, docs, or ops.',
+      'Create or update a versioned feature set under a FuncTree project. Upserts by id or stableKey and returns operation plus changedFields.',
     inputSchema: {
-      id: z.string().optional().describe('Optional stable feature set ID. If omitted, FuncTree generates one.'),
+      ...featureSetItemShape,
       projectId: z.string().describe('ID of the project that owns this feature set.'),
-      name: z.string().describe('Feature set name, for example App frontend or Auth service.'),
-      version: z.string().describe('Feature set version, release, or snapshot label.'),
-      type: z.enum(featureSetTypes).describe('Feature set category.'),
-      status: z.enum(featureSetStatuses).optional().describe('Feature set lifecycle status. Defaults to normal.'),
-      description: z.string().optional().describe('Human-readable feature set summary.'),
-      owner: z.string().optional().describe('Team, role, or person responsible for this feature set.')
+      dryRun: dryRunSchema
     },
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: false,
+      idempotentHint: true,
       openWorldHint: true
     }
   },
@@ -107,22 +153,16 @@ server.registerTool(
   {
     title: 'Create or update feature',
     description:
-      'Create or update a feature inside a feature set. Features can represent capabilities, modules, pages, APIs, components, processes, rules, tests, or docs, and may form parent-child trees.',
+      'Create or update a feature inside a feature set. Upserts by id or stableKey+version and returns operation plus changedFields.',
     inputSchema: {
-      id: z.string().optional().describe('Optional concrete feature object ID. If omitted, FuncTree generates one.'),
+      ...featureItemShape,
       featureSetId: z.string().describe('ID of the feature set that owns this feature.'),
-      parentFeatureId: z.string().nullable().optional().describe('Optional parent feature ID for child features.'),
-      stableKey: z.string().describe('Long-lived semantic key, for example login or checkout.payment.'),
-      name: z.string().describe('Feature display name.'),
-      version: z.string().optional().describe('Feature version or release label. Defaults to 当前.'),
-      status: z.enum(featureStatuses).optional().describe('Feature lifecycle status. Defaults to draft.'),
-      kind: z.enum(featureKinds).optional().describe('Feature kind. Defaults to capability.'),
-      description: z.string().optional().describe('Human-readable feature summary.')
+      dryRun: dryRunSchema
     },
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: false,
+      idempotentHint: true,
       openWorldHint: true
     }
   },
@@ -130,34 +170,41 @@ server.registerTool(
 );
 
 server.registerTool(
-  'functree_create_alignment',
+  'functree_upsert_alignment',
   {
     title: 'Create or update alignment relation',
     description:
-      'Create or update a cross-level alignment relation connecting two or more projects, feature sets, or features in the same project. Use this for product-to-frontend, frontend-to-backend, requirement-to-test, dependency, validation, coverage, decomposition, or conflict relationships.',
+      'Create or update a cross-level alignment relation. Upserts by id, stableKey, or member set to avoid duplicate frontend/backend/product/test relationships.',
     inputSchema: {
-      id: z.string().optional().describe('Optional alignment ID. If omitted, FuncTree generates one.'),
+      ...alignmentItemShape,
       projectId: z.string().describe('ID of the project that owns the alignment.'),
-      name: z.string().describe('Alignment name shown in FuncTree.'),
-      relation: z.enum(alignmentRelations).optional().describe('Semantic relationship type. Defaults to corresponds_to.'),
-      status: z.enum(alignmentStatuses).optional().describe('Alignment review status. Defaults to proposed.'),
-      description: z.string().optional().describe('Human-readable alignment rationale.'),
-      members: z
-        .array(
-          z.object({
-            targetType: z.enum(alignableTypes).describe('Type of aligned object.'),
-            targetId: z.string().describe('ID of the aligned object.'),
-            role: z.enum(alignmentRoles).optional().describe('Role of this member in the alignment. Defaults to peer.'),
-            note: z.string().optional().describe('Optional member-specific note.')
-          })
-        )
-        .min(2)
-        .describe('Two or more objects to align. All members must belong to the same FuncTree project.')
+      dryRun: dryRunSchema
     },
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
-      idempotentHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_alignment', args))
+);
+
+server.registerTool(
+  'functree_create_alignment',
+  {
+    title: 'Create or update alignment relation',
+    description:
+      'Compatibility alias for functree_upsert_alignment. New clients should call functree_upsert_alignment.',
+    inputSchema: {
+      ...alignmentItemShape,
+      projectId: z.string().describe('ID of the project that owns the alignment.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
       openWorldHint: true
     }
   },
@@ -165,15 +212,94 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_upsert_feature_sets_batch',
+  {
+    title: 'Batch upsert feature sets',
+    description:
+      'Batch upsert feature sets under one project. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all feature sets in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(featureSetItemShape)).min(1).max(100).describe('Feature sets to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_feature_sets_batch', args))
+);
+
+server.registerTool(
+  'functree_upsert_features_batch',
+  {
+    title: 'Batch upsert features',
+    description:
+      'Batch upsert features under one feature set. Supports dryRun and returns per-item operation, changedFields, and errors with rollback on write failure.',
+    inputSchema: {
+      featureSetId: z.string().describe('ID of the feature set that owns all features in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(featureItemShape)).min(1).max(300).describe('Features to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_features_batch', args))
+);
+
+server.registerTool(
+  'functree_upsert_alignments_batch',
+  {
+    title: 'Batch upsert alignments',
+    description:
+      'Batch upsert alignments under one project. Each item upserts by id, stableKey, or member set and supports dryRun plus rollback on write failure.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all alignments in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(alignmentItemShape)).min(1).max(100).describe('Alignments to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_alignments_batch', args))
+);
+
+server.registerTool(
   'functree_query_context',
   {
     title: 'Query FuncTree context',
     description:
-      'Read project, feature set, feature, and alignment context from FuncTree. Use this before making changes when IDs or existing feature knowledge are uncertain.',
+      'Read project, feature set, feature, and alignment context from FuncTree. Use before writing when IDs, stableKeys, or existing relationships are uncertain.',
     inputSchema: {
-      projectId: z.string().optional().describe('Optional project ID. When omitted, returns project overview context.'),
-      keyword: z.string().optional().describe('Optional keyword matched against indexed feature names, stable keys, versions, and descriptions.'),
-      limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().describe('Maximum number of features or alignments to return. Defaults to 20.')
+      projectId: z.string().optional().describe('Optional project ID. When omitted, can return project overview context.'),
+      keyword: z
+        .string()
+        .optional()
+        .describe('Optional keyword matched against names, descriptions, versions, stableKeys, and IDs. Supports dot and hyphen fragments.'),
+      types: z.array(z.enum(queryContextTypes)).min(1).max(4).optional().describe('Object types to return, for example ["feature"].'),
+      featureSetId: z.string().optional().describe('Filter feature sets, features, or related alignments by feature set ID.'),
+      stableKey: z.string().optional().describe('Exact stableKey filter for feature sets, features, or alignments.'),
+      alignmentId: z.string().optional().describe('Filter alignments or alignment members by alignment ID.'),
+      parentFeatureId: z.string().nullable().optional().describe('Filter features by parent feature ID. Use null for root features.'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(QUERY_CONTEXT_MAX_LIMIT)
+        .optional()
+        .describe('Maximum number of rows per returned object type. Defaults to 20.'),
+      offset: z.number().int().min(0).max(100000).optional().describe('Offset for pagination. Defaults to 0.'),
+      cursor: z.string().optional().describe('Cursor from the previous response page.nextCursor. Overrides offset when supplied.')
     },
     annotations: {
       readOnlyHint: true,
@@ -200,7 +326,7 @@ async function callHttpTool(config: Config, name: string, args: unknown): Promis
 
     if (!response.ok) {
       const message = await response.text();
-      throw new Error(`FuncTree Server call failed: ${response.status} ${message}`);
+      throw new Error(`FuncTree Server call failed: ${response.status} ${formatHttpError(message)}`);
     }
 
     return response.json();
@@ -313,6 +439,17 @@ function parsePositiveInt(value: string | undefined, fallback: number, label: st
     throw new Error(`${label} must be a positive integer.`);
   }
   return parsed;
+}
+
+function formatHttpError(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { code?: string; message?: string; hint?: string; requestId?: string };
+    return [parsed.code, parsed.message, parsed.hint ? `hint=${parsed.hint}` : '', parsed.requestId ? `requestId=${parsed.requestId}` : '']
+      .filter(Boolean)
+      .join(' ');
+  } catch {
+    return body;
+  }
 }
 
 function printHelp(): void {

@@ -1,6 +1,6 @@
 {
   "name": "@gavin7758521/functree-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "FuncTree remote MCP adapter for Codex and other MCP clients.",
   "type": "module",
   "bin": {

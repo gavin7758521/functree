@@ -34,21 +34,43 @@ export function createHttpServer(db: Db): FastifyInstance {
     return payload;
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
+    const requestId = String(request.id);
     if (error instanceof ZodError) {
-      reply.status(400).send({ error: '输入校验失败', details: error.issues });
+      reply.status(400).send({
+        code: 'VALIDATION_ERROR',
+        message: '输入校验失败。',
+        hint: '检查字段类型、枚举值、必填字段和数值范围后重试。',
+        requestId,
+        details: error.issues
+      });
       return;
     }
     if (error instanceof NotFoundError) {
-      reply.status(404).send({ error: error.message });
+      reply.status(404).send({
+        code: error.code,
+        message: error.message,
+        hint: error.hint,
+        requestId
+      });
       return;
     }
     if (error instanceof ValidationError) {
-      reply.status(400).send({ error: error.message });
+      reply.status(400).send({
+        code: error.code,
+        message: error.message,
+        hint: error.hint,
+        requestId
+      });
       return;
     }
     console.error(error);
-    reply.status(500).send({ error: '服务端处理失败。' });
+    reply.status(500).send({
+      code: 'INTERNAL_ERROR',
+      message: '服务端处理失败。',
+      hint: '记录 requestId 后查看服务端日志；如果是查询参数导致，请缩小筛选条件后重试。',
+      requestId
+    });
   });
 
   app.get('/health', async () => ({ ok: true, name: 'FuncTree' }));

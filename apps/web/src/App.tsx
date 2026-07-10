@@ -517,7 +517,11 @@ function McpView() {
           'functree_create_project',
           'functree_upsert_feature_set',
           'functree_upsert_feature',
+          'functree_upsert_alignment',
           'functree_create_alignment',
+          'functree_upsert_feature_sets_batch',
+          'functree_upsert_features_batch',
+          'functree_upsert_alignments_batch',
           'functree_query_context'
         ].map((tool) => (
           <article key={tool}>
@@ -582,6 +586,7 @@ function FeatureSetDetail({ featureSet, labels }: { featureSet: FeatureSet | und
       <InfoGrid
         items={[
           ['ID', featureSet.id],
+          ['稳定键', featureSet.stableKey || '未设置'],
           ['版本', featureSet.version],
           ['状态', labels?.featureSetStatus[featureSet.status] ?? featureSet.status],
           ['负责人', featureSet.owner || '未设置'],
@@ -642,6 +647,7 @@ function AlignmentDetail({ alignment, labels }: { alignment: Alignment | undefin
       <InfoGrid
         items={[
           ['ID', alignment.id],
+          ['稳定键', alignment.stableKey || '未设置'],
           ['关系', labels?.alignmentRelation[alignment.relation] ?? alignment.relation],
           ['成员数量', String(alignment.members.length)]
         ]}
@@ -681,6 +687,7 @@ function ProjectCreator({ onCreated, compact = false }: { onCreated: (project: P
 
 function FeatureSetCreator({ projectId, onCreated }: { projectId: string; onCreated: () => Promise<void> }) {
   const [name, setName] = useState('');
+  const [stableKey, setStableKey] = useState('');
   const [type, setType] = useState('frontend');
   const [version, setVersion] = useState('当前');
   return (
@@ -689,13 +696,15 @@ function FeatureSetCreator({ projectId, onCreated }: { projectId: string; onCrea
       onSubmit={async (event) => {
         event.preventDefault();
         if (!projectId) return;
-        await postJson(`/api/projects/${projectId}/feature-sets`, { name, type, version, status: 'normal' });
+        await postJson(`/api/projects/${projectId}/feature-sets`, { name, stableKey: stableKey || undefined, type, version, status: 'normal' });
         setName('');
+        setStableKey('');
         await onCreated();
       }}
     >
       <h3>新建功能集</h3>
       <input value={name} onChange={(event) => setName(event.target.value)} placeholder="名称，例如 App 前端" required />
+      <input value={stableKey} onChange={(event) => setStableKey(event.target.value)} placeholder="稳定键，例如 web.frontend" />
       <input value={version} onChange={(event) => setVersion(event.target.value)} placeholder="版本" required />
       <select value={type} onChange={(event) => setType(event.target.value)}>
         <option value="frontend">前端</option>

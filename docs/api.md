@@ -50,6 +50,7 @@ POST /api/projects/:projectId/alignments
 ```http
 GET /api/mcp/tools
 POST /api/mcp/call
+GET /api/query
 ```
 
 示例：
@@ -59,7 +60,34 @@ POST /api/mcp/call
   "name": "functree_query_context",
   "arguments": {
     "projectId": "proj_your_app",
-    "keyword": "登录"
+    "types": ["feature"],
+    "keyword": "backend.bots",
+    "limit": 100,
+    "cursor": "100"
   }
+}
+```
+
+`functree_query_context` 支持：
+
+- `types`: `project` / `feature_set` / `feature` / `alignment`
+- `featureSetId`
+- `stableKey`
+- `alignmentId`
+- `parentFeatureId`
+- `offset` / `cursor`
+
+返回包含 `projects`、`featureSets`、`features`、`alignments`、`page` 和 `summary`。`summary` 包含功能集数、功能数、对齐关系数、最近更新时间和 stableKey 冲突数。
+
+## 错误格式
+
+所有 HTTP 错误统一返回：
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "输入校验失败。",
+  "hint": "检查字段类型、枚举值、必填字段和数值范围后重试。",
+  "requestId": "req-1"
 }
 ```

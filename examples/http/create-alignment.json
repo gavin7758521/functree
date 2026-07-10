@@ -1,4 +1,5 @@
 {
+  "stableKey": "login.web-to-requirement",
   "name": "登录链路对齐",
   "relation": "corresponds_to",
   "status": "proposed",

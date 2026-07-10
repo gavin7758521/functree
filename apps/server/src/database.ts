@@ -37,6 +37,7 @@ function migrate(db: Db): void {
     CREATE TABLE IF NOT EXISTS feature_sets (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      stable_key TEXT NOT NULL DEFAULT '',
       name TEXT NOT NULL,
       version TEXT NOT NULL,
       type TEXT NOT NULL,
@@ -69,6 +70,8 @@ function migrate(db: Db): void {
     CREATE TABLE IF NOT EXISTS alignments (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      stable_key TEXT NOT NULL DEFAULT '',
+      member_signature TEXT NOT NULL DEFAULT '',
       name TEXT NOT NULL,
       relation TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -114,4 +117,19 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_alignment_members_alignment ON alignment_members(alignment_id);
     CREATE INDEX IF NOT EXISTS idx_alignment_members_target ON alignment_members(target_type, target_id);
   `);
+  ensureColumn(db, 'feature_sets', 'stable_key', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'alignments', 'stable_key', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'alignments', 'member_signature', "TEXT NOT NULL DEFAULT ''");
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_sets_project_stable_key ON feature_sets(project_id, stable_key) WHERE stable_key <> '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_alignments_project_stable_key ON alignments(project_id, stable_key) WHERE stable_key <> '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_alignments_project_member_signature ON alignments(project_id, member_signature) WHERE member_signature <> '';
+  `);
+}
+
+function ensureColumn(db: Db, table: string, column: string, definition: string): void {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!rows.some((row) => row.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }

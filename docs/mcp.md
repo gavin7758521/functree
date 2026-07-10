@@ -75,7 +75,19 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_feature]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_alignment]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_create_alignment]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_feature_sets_batch]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_features_batch]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
 ```
 
@@ -112,7 +124,7 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 
 ### functree_upsert_feature_set
 
-在项目下创建或更新带版本的功能集，例如前端、后端、产品需求、UI/UX、测试、文档或运维视角。
+在项目下创建或更新带 stableKey 的功能集，例如前端、后端、产品需求、UI/UX、测试、文档或运维视角。按 `id` 或 `stableKey` 查重。
 
 必填：
 
@@ -120,6 +132,16 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 - `name`
 - `version`
 - `type`
+
+可选：
+
+- `id`
+- `stableKey`
+- `status`
+- `description`
+- `owner`
+- `metadata`
+- `dryRun`
 
 ### functree_upsert_feature
 
@@ -139,10 +161,13 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 - `status`
 - `kind`
 - `description`
+- `sortOrder`
+- `metadata`
+- `dryRun`
 
-### functree_create_alignment
+### functree_upsert_alignment
 
-在同一项目内的项目、功能集、功能之间建立跨层级对齐关系。
+在同一项目内的项目、功能集、功能之间建立跨层级对齐关系。按 `id`、`stableKey` 或成员集合查重，避免重复创建相同“前端 X 对应后端 Y”关系。
 
 必填：
 
@@ -151,6 +176,37 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 - `members`
 
 `members` 至少包含两个对象，对象可以是项目、功能集或功能。
+
+可选：
+
+- `id`
+- `stableKey`
+- `relation`
+- `status`
+- `description`
+- `metadata`
+- `dryRun`
+
+### functree_create_alignment
+
+旧兼容入口，语义等同 `functree_upsert_alignment`。新调用方建议使用 `functree_upsert_alignment`。
+
+### batch 工具
+
+批量写入工具用于一次同步多个对象：
+
+- `functree_upsert_feature_sets_batch`
+- `functree_upsert_features_batch`
+- `functree_upsert_alignments_batch`
+
+每个 batch 支持 `dryRun: true`。写入模式下如果某一项失败，会回滚本批次已写入项，并返回 `errors[index, code, message, hint]`。
+
+单项 upsert 和 batch 结果包含：
+
+- `operation`: `created` / `updated` / `unchanged` / `dry_run`
+- `changedFields`
+- `data`
+- `dryRun`
 
 ### functree_query_context
 
@@ -161,6 +217,15 @@ FUNCTREE_SERVER_URL=http://192.168.124.82:4174 scripts/functree-mcp.sh
 - `projectId`
 - `keyword`
 - `limit`：1 到 200，默认 20
+- `types`：例如 `["feature"]`
+- `featureSetId`
+- `stableKey`
+- `alignmentId`
+- `parentFeatureId`
+- `offset`
+- `cursor`
+
+返回包含 `page.nextCursor`，下一页请求传入 `cursor` 即可。`summary` 返回功能集数、功能数、对齐关系数、最近更新时间和 stableKey 冲突数。
 
 ## 打包边界
 

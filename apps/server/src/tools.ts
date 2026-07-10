@@ -1,11 +1,14 @@
 import {
+  BatchAlignmentSchema,
+  BatchFeatureSchema,
+  BatchFeatureSetSchema,
   CreateAlignmentSchema,
   CreateFeatureSchema,
   CreateFeatureSetSchema,
   CreateProjectSchema,
   QueryContextSchema
 } from '@functree/domain';
-import type { FuncTreeRepository } from './repository.js';
+import { ValidationError, type FuncTreeRepository } from './repository.js';
 
 export const toolDefinitions = [
   {
@@ -16,22 +19,42 @@ export const toolDefinitions = [
   {
     name: 'functree_upsert_feature_set',
     title: '写入功能集',
-    description: '在项目下创建或更新带版本的功能集，例如前端、后端、产品需求、UI/UX、测试、文档或运维视角。'
+    description: '在项目下创建或更新带 stableKey 的功能集，例如前端、后端、产品需求、UI/UX、测试、文档或运维视角。返回 created/updated/unchanged/dry_run。'
   },
   {
     name: 'functree_upsert_feature',
     title: '写入功能',
-    description: '在功能集下创建或更新功能，支持功能版本、稳定语义键、类型、状态和父子功能树。'
+    description: '在功能集下创建或更新功能，支持功能版本、stableKey、类型、状态和父子功能树。返回 created/updated/unchanged/dry_run。'
+  },
+  {
+    name: 'functree_upsert_alignment',
+    title: '写入对齐关系',
+    description: '按 id、stableKey 或成员集合创建/更新对齐关系，避免重复创建“前端 X 对应后端 Y”一类关系。'
   },
   {
     name: 'functree_create_alignment',
     title: '建立对齐关系',
-    description: '在同一项目内的项目、功能集、功能之间建立跨层级对齐关系，用于表达对应、实现、支撑、验证、依赖、覆盖、拆解或冲突。'
+    description: '兼容旧入口；语义等同 functree_upsert_alignment。建议新调用方使用 functree_upsert_alignment。'
+  },
+  {
+    name: 'functree_upsert_feature_sets_batch',
+    title: '批量写入功能集',
+    description: '在同一项目下批量 upsert 功能集，支持 dryRun，并在失败时返回具体失败项。'
+  },
+  {
+    name: 'functree_upsert_features_batch',
+    title: '批量写入功能',
+    description: '在同一功能集下批量 upsert 功能，支持 dryRun，并在失败时返回具体失败项。'
+  },
+  {
+    name: 'functree_upsert_alignments_batch',
+    title: '批量写入对齐关系',
+    description: '在同一项目下批量 upsert 对齐关系，支持 dryRun，并按 id、stableKey 或成员集合去重。'
   },
   {
     name: 'functree_query_context',
     title: '查询上下文',
-    description: '只读查询 FuncTree 项目、功能集、功能和对齐关系。写入前不确定 ID 或已有上下文时应先调用。'
+    description: '只读查询 FuncTree 项目、功能集、功能和对齐关系，支持 keyword、types、stableKey、featureSetId、alignmentId、parentFeatureId、offset/cursor 与统计摘要。'
   }
 ];
 
@@ -45,23 +68,33 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     case 'functree_upsert_feature_set': {
       const input = CreateFeatureSetSchema.parse(args);
       if (!input.projectId) {
-        throw new Error('projectId 必填。');
+        throw new ValidationError('projectId 必填。');
       }
-      return repo.createFeatureSet(input.projectId, input);
+      return repo.upsertFeatureSet(input.projectId, input);
     }
     case 'functree_upsert_feature': {
       const input = CreateFeatureSchema.parse(args);
       if (!input.featureSetId) {
-        throw new Error('featureSetId 必填。');
+        throw new ValidationError('featureSetId 必填。');
       }
-      return repo.createFeature(input.featureSetId, input);
+      return repo.upsertFeature(input.featureSetId, input);
     }
+    case 'functree_upsert_alignment':
     case 'functree_create_alignment': {
       const input = CreateAlignmentSchema.parse(args);
       if (!input.projectId) {
-        throw new Error('projectId 必填。');
+        throw new ValidationError('projectId 必填。');
       }
-      return repo.createAlignment(input.projectId, input);
+      return repo.upsertAlignment(input.projectId, input);
+    }
+    case 'functree_upsert_feature_sets_batch': {
+      return repo.upsertFeatureSetsBatch(BatchFeatureSetSchema.parse(args));
+    }
+    case 'functree_upsert_features_batch': {
+      return repo.upsertFeaturesBatch(BatchFeatureSchema.parse(args));
+    }
+    case 'functree_upsert_alignments_batch': {
+      return repo.upsertAlignmentsBatch(BatchAlignmentSchema.parse(args));
     }
     case 'functree_query_context': {
       return repo.queryContext(QueryContextSchema.parse(args));

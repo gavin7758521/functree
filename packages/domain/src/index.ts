@@ -50,6 +50,7 @@ export const AlignmentRelationSchema = z.enum([
 ]);
 export const AlignmentStatusSchema = z.enum(['proposed', 'confirmed', 'rejected', 'stale']);
 export const AlignmentRoleSchema = z.enum(['source', 'target', 'peer', 'evidence']);
+export const QueryContextTypeSchema = z.enum(['project', 'feature_set', 'feature', 'alignment']);
 
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export type FeatureSetType = z.infer<typeof FeatureSetTypeSchema>;
@@ -60,6 +61,7 @@ export type AlignableType = z.infer<typeof AlignableTypeSchema>;
 export type AlignmentRelation = z.infer<typeof AlignmentRelationSchema>;
 export type AlignmentStatus = z.infer<typeof AlignmentStatusSchema>;
 export type AlignmentRole = z.infer<typeof AlignmentRoleSchema>;
+export type QueryContextType = z.infer<typeof QueryContextTypeSchema>;
 
 const IdSchema = z
   .string()
@@ -72,6 +74,8 @@ const OptionalTextSchema = z.string().trim().max(4000).optional().default('');
 const VersionSchema = z.string().trim().min(1).max(80).default('当前');
 const MetadataSchema = z.record(z.string(), z.unknown()).optional().default({});
 export const QUERY_CONTEXT_MAX_LIMIT = 200;
+const StableKeySchema = z.string().trim().min(1).max(160);
+const DryRunSchema = z.boolean().optional().default(false);
 
 export const CreateProjectSchema = z.object({
   id: IdSchema.optional(),
@@ -87,16 +91,18 @@ export const UpdateProjectSchema = CreateProjectSchema.partial().omit({ id: true
 export const CreateFeatureSetSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
   name: TextSchema,
   version: VersionSchema,
   type: FeatureSetTypeSchema,
   status: FeatureSetStatusSchema.default('normal'),
   description: OptionalTextSchema,
   owner: z.string().trim().max(120).optional().default(''),
-  metadata: MetadataSchema
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
 });
 
-export const UpdateFeatureSetSchema = CreateFeatureSetSchema.partial().omit({ id: true, projectId: true });
+export const UpdateFeatureSetSchema = CreateFeatureSetSchema.partial().omit({ id: true, projectId: true, dryRun: true });
 
 export const CreateFeatureSchema = z.object({
   id: IdSchema.optional(),
@@ -110,13 +116,15 @@ export const CreateFeatureSchema = z.object({
   kind: FeatureKindSchema.default('capability'),
   description: OptionalTextSchema,
   sortOrder: z.number().int().min(0).max(100000).optional().default(0),
-  metadata: MetadataSchema
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
 });
 
 export const UpdateFeatureSchema = CreateFeatureSchema.partial().omit({
   id: true,
   projectId: true,
-  featureSetId: true
+  featureSetId: true,
+  dryRun: true
 });
 
 export const AlignmentMemberSchema = z.object({
@@ -129,20 +137,47 @@ export const AlignmentMemberSchema = z.object({
 export const CreateAlignmentSchema = z.object({
   id: IdSchema.optional(),
   projectId: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
   name: TextSchema,
   relation: AlignmentRelationSchema.default('corresponds_to'),
   status: AlignmentStatusSchema.default('proposed'),
   description: OptionalTextSchema,
   members: z.array(AlignmentMemberSchema).min(2).max(20),
-  metadata: MetadataSchema
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
 });
 
-export const UpdateAlignmentSchema = CreateAlignmentSchema.partial().omit({ id: true, projectId: true });
+export const UpdateAlignmentSchema = CreateAlignmentSchema.partial().omit({ id: true, projectId: true, dryRun: true });
 
 export const QueryContextSchema = z.object({
   projectId: IdSchema.optional(),
   keyword: z.string().trim().max(120).optional().default(''),
-  limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().default(20)
+  types: z.array(QueryContextTypeSchema).min(1).max(4).optional(),
+  featureSetId: IdSchema.optional(),
+  stableKey: z.string().trim().min(1).max(160).optional(),
+  alignmentId: IdSchema.optional(),
+  parentFeatureId: IdSchema.nullable().optional(),
+  limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().default(20),
+  offset: z.number().int().min(0).max(100000).optional().default(0),
+  cursor: z.string().trim().max(40).optional()
+});
+
+export const BatchFeatureSetSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateFeatureSetSchema.omit({ projectId: true, dryRun: true })).min(1).max(100)
+});
+
+export const BatchFeatureSchema = z.object({
+  featureSetId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateFeatureSchema.omit({ projectId: true, featureSetId: true, dryRun: true })).min(1).max(300)
+});
+
+export const BatchAlignmentSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateAlignmentSchema.omit({ projectId: true, dryRun: true })).min(1).max(100)
 });
 
 export type CreateProjectInput = z.input<typeof CreateProjectSchema>;
@@ -150,6 +185,9 @@ export type CreateFeatureSetInput = z.input<typeof CreateFeatureSetSchema>;
 export type CreateFeatureInput = z.input<typeof CreateFeatureSchema>;
 export type CreateAlignmentInput = z.input<typeof CreateAlignmentSchema>;
 export type QueryContextInput = z.input<typeof QueryContextSchema>;
+export type BatchFeatureSetInput = z.input<typeof BatchFeatureSetSchema>;
+export type BatchFeatureInput = z.input<typeof BatchFeatureSchema>;
+export type BatchAlignmentInput = z.input<typeof BatchAlignmentSchema>;
 
 export const labels = {
   projectStatus: {

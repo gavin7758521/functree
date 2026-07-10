@@ -21,6 +21,7 @@ export type Project = {
 export type FeatureSet = {
   id: string;
   projectId: string;
+  stableKey: string;
   name: string;
   version: string;
   type: string;
@@ -47,6 +48,7 @@ export type Feature = {
 export type Alignment = {
   id: string;
   projectId: string;
+  stableKey: string;
   name: string;
   relation: string;
   status: string;
