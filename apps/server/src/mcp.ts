@@ -2,13 +2,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { openDatabase } from './database.js';
-import { FuncTreeRepository } from './repository.js';
-import { callTool, textResult } from './tools.js';
+import { textResult } from './tools.js';
 
-const db = openDatabase(process.env.FUNCTREE_DB);
-const repo = new FuncTreeRepository(db);
-repo.seedIfEmpty();
+const serverUrl = normalizeServerUrl(process.env.FUNCTREE_SERVER_URL ?? 'http://127.0.0.1:4174');
 
 const server = new McpServer({
   name: 'functree',
@@ -28,7 +24,7 @@ server.registerTool(
       description: z.string().optional()
     }
   },
-  async (args) => textResult(await callTool(repo, 'functree_create_project', args))
+  async (args) => textResult(await callHttpTool('functree_create_project', args))
 );
 
 server.registerTool(
@@ -47,7 +43,7 @@ server.registerTool(
       owner: z.string().optional()
     }
   },
-  async (args) => textResult(await callTool(repo, 'functree_upsert_feature_set', args))
+  async (args) => textResult(await callHttpTool('functree_upsert_feature_set', args))
 );
 
 server.registerTool(
@@ -67,7 +63,7 @@ server.registerTool(
       description: z.string().optional()
     }
   },
-  async (args) => textResult(await callTool(repo, 'functree_upsert_feature', args))
+  async (args) => textResult(await callHttpTool('functree_upsert_feature', args))
 );
 
 server.registerTool(
@@ -94,7 +90,7 @@ server.registerTool(
       )
     }
   },
-  async (args) => textResult(await callTool(repo, 'functree_create_alignment', args))
+  async (args) => textResult(await callHttpTool('functree_create_alignment', args))
 );
 
 server.registerTool(
@@ -108,7 +104,26 @@ server.registerTool(
       limit: z.number().optional()
     }
   },
-  async (args) => textResult(await callTool(repo, 'functree_query_context', args))
+  async (args) => textResult(await callHttpTool('functree_query_context', args))
 );
 
 await server.connect(new StdioServerTransport());
+
+async function callHttpTool(name: string, args: unknown): Promise<unknown> {
+  const response = await fetch(`${serverUrl}/api/mcp/call`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, arguments: args ?? {} })
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`FuncTree Server 调用失败：${response.status} ${message}`);
+  }
+
+  return response.json();
+}
+
+function normalizeServerUrl(value: string): string {
+  return value.replace(/\/+$/u, '');
+}

@@ -40,6 +40,19 @@ MCP stdio 服务：
 pnpm mcp
 ```
 
+MCP 只是 Codex 等 AI 工具访问 FuncTree 的适配层，业务数据仍由 FuncTree HTTP 服务写入统一数据库。先启动服务端，再启动 MCP：
+
+```bash
+pnpm start
+FUNCTREE_SERVER_URL=http://127.0.0.1:4174 pnpm mcp
+```
+
+Codex 接入可以使用：
+
+```bash
+scripts/functree-mcp.sh
+```
+
 ## 项目结构
 
 ```text
