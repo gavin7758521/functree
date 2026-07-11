@@ -1,10 +1,13 @@
 import {
-  Boxes,
+  BookOpen,
   Braces,
   ChevronDown,
   ChevronRight,
   Code2,
+  Compass,
   FileCode2,
+  FileSearch,
+  GitBranch,
   GitMerge,
   Layers3,
   Link2,
@@ -22,20 +25,22 @@ import type { Alignment, Catalog, CodeReference, EntryPoint, Feature, FuncMap, O
 
 type View = 'overview' | 'maps' | 'features' | 'entryPoints' | 'references' | 'alignments' | 'mcp';
 
-const views: Array<{ id: View; label: string; icon: LucideIcon }> = [
-  { id: 'overview', label: '项目总览', icon: Layers3 },
-  { id: 'maps', label: '功能地图', icon: MapIcon },
-  { id: 'features', label: '功能树', icon: Network },
-  { id: 'entryPoints', label: '入口文件', icon: FileCode2 },
-  { id: 'references', label: '代码引用', icon: Code2 },
-  { id: 'alignments', label: '对齐关系', icon: GitMerge },
-  { id: 'mcp', label: 'MCP 工具', icon: Braces }
+type ViewMeta = { id: View; label: string; icon: LucideIcon; group: '知识结构' | '代码视角' | '同步工具' };
+
+const views: ViewMeta[] = [
+  { id: 'overview', label: '项目总览', icon: Layers3, group: '知识结构' },
+  { id: 'maps', label: '功能地图', icon: MapIcon, group: '知识结构' },
+  { id: 'features', label: '功能树', icon: Network, group: '知识结构' },
+  { id: 'alignments', label: '对齐关系', icon: GitMerge, group: '知识结构' },
+  { id: 'entryPoints', label: '入口文件', icon: FileCode2, group: '代码视角' },
+  { id: 'references', label: '代码引用', icon: Code2, group: '代码视角' },
+  { id: 'mcp', label: 'MCP 与同步', icon: Braces, group: '同步工具' }
 ];
 
 const mcpToolGroups = [
   {
     name: '查询',
-    tools: ['functree_query_context']
+    tools: ['functree_query_context', 'functree_resolve_stable_keys', 'functree_project_summary', 'functree_query_path_context']
   },
   {
     name: '写入',
@@ -44,6 +49,10 @@ const mcpToolGroups = [
   {
     name: '批量',
     tools: ['functree_upsert_maps_batch', 'functree_upsert_features_batch', 'functree_upsert_entry_points_batch', 'functree_upsert_code_references_batch', 'functree_upsert_alignments_batch']
+  },
+  {
+    name: '扫描',
+    tools: ['functree_begin_scan', 'functree_finish_scan']
   }
 ];
 
@@ -96,11 +105,12 @@ export function App() {
   }
 
   const allFeatures = useMemo(() => tree?.maps.flatMap((map) => flattenFeatures(map.features ?? [])) ?? [], [tree]);
-  const filteredFeatures = useMemo(() => {
-    if (!keyword.trim()) return allFeatures;
-    const value = keyword.trim().toLowerCase();
-    return allFeatures.filter((feature) => `${feature.name} ${feature.stableKey} ${feature.description} ${feature.tags?.join(' ')}`.toLowerCase().includes(value));
-  }, [allFeatures, keyword]);
+
+  function selectMapForFeatureTree(mapId: string) {
+    setSelectedMapId(mapId);
+    const firstFeature = flattenFeatures(tree?.maps.find((map) => map.id === mapId)?.features ?? [])[0];
+    if (firstFeature) setSelectedFeatureId(firstFeature.id);
+  }
 
   useEffect(() => {
     if (!tree) {
@@ -130,6 +140,7 @@ export function App() {
   }, [allFeatures, selectedAlignmentId, selectedCodeReferenceId, selectedEntryPointId, selectedFeatureId, selectedMapId, tree]);
 
   const labels = catalog?.labels;
+  const currentView = views.find((item) => item.id === view) ?? views[0];
 
   return (
     <main className="layout">
@@ -163,6 +174,10 @@ export function App() {
       <section className="main">
         <header className="topbar">
           <div>
+            <div className="eyebrow">
+              <Compass size={14} />
+              <span>{currentView.group}</span>
+            </div>
             <h1>{tree?.project.name ?? '项目工作台'}</h1>
             <p>{tree ? tree.project.description || `${tree.project.id} / ${tree.project.currentVersion}` : '暂无项目'}</p>
           </div>
@@ -171,17 +186,7 @@ export function App() {
           </button>
         </header>
 
-        <nav className="tabs" aria-label="页面">
-          {views.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.id} type="button" className={view === item.id ? 'tab active' : 'tab'} onClick={() => setView(item.id)}>
-                <Icon size={17} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <WorkspaceNav view={view} onSelect={setView} tree={tree} overview={overview} selectedMapId={selectedMapId} selectedFeatureId={selectedFeatureId} />
 
         {message ? <div className="message">{message}</div> : null}
 
@@ -208,12 +213,11 @@ export function App() {
             labels={labels}
             keyword={keyword}
             setKeyword={setKeyword}
-            filteredFeatures={filteredFeatures}
             selectedFeatureId={selectedFeatureId}
             selectedMapId={selectedMapId}
             expandedFeatureIds={expandedFeatureIds}
             onSelectFeature={setSelectedFeatureId}
-            onSelectMap={setSelectedMapId}
+            onSelectMap={selectMapForFeatureTree}
             onToggle={(featureId) => {
               setExpandedFeatureIds((current) => {
                 const next = new Set(current);
@@ -268,6 +272,169 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function WorkspaceNav({
+  view,
+  onSelect,
+  tree,
+  overview,
+  selectedMapId,
+  selectedFeatureId
+}: {
+  view: View;
+  onSelect: (view: View) => void;
+  tree: ProjectTree | null;
+  overview: Overview | null;
+  selectedMapId: string;
+  selectedFeatureId: string;
+}) {
+  const selectedMap = tree?.maps.find((map) => map.id === selectedMapId) ?? tree?.maps[0];
+  const selectedMapFeatures = selectedMap ? flattenFeatures(selectedMap.features ?? []) : [];
+  const selectedFeature = selectedMapFeatures.find((feature) => feature.id === selectedFeatureId) ?? selectedMapFeatures[0];
+  const codeViews = views.filter((item) => item.group === '代码视角');
+  const syncViews = views.filter((item) => item.group === '同步工具');
+
+  return (
+    <nav className="workspaceNav" aria-label="工作区">
+      <section className="structureRail" aria-label="知识结构">
+        <header>
+          <BookOpen size={15} />
+          <span>知识结构</span>
+        </header>
+        <div className="structureSteps">
+          <HierarchyStep
+            active={view === 'overview'}
+            icon={Layers3}
+            level="01"
+            title="项目"
+            primary={tree?.project.name ?? '暂无项目'}
+            secondary={tree?.project.currentVersion ?? ''}
+            count={viewCount('overview', tree, overview)}
+            onSelect={() => onSelect('overview')}
+          />
+          <span className="stepConnector" aria-hidden="true" />
+          <HierarchyStep
+            active={view === 'maps'}
+            icon={MapIcon}
+            level="02"
+            title="功能地图"
+            primary={selectedMap?.name ?? '暂无地图'}
+            secondary={selectedMap?.stableKey ?? ''}
+            count={viewCount('maps', tree, overview)}
+            onSelect={() => onSelect('maps')}
+          />
+          <span className="stepConnector" aria-hidden="true" />
+          <HierarchyStep
+            active={view === 'features'}
+            icon={Network}
+            level="03"
+            title="功能树"
+            primary={selectedFeature?.name ?? '暂无功能'}
+            secondary={selectedFeature?.stableKey ?? ''}
+            count={String(selectedMapFeatures.length)}
+            onSelect={() => onSelect('features')}
+          />
+        </div>
+        <button type="button" className={view === 'alignments' ? 'relationStep active' : 'relationStep'} onClick={() => onSelect('alignments')} aria-current={view === 'alignments' ? 'page' : undefined}>
+          <GitMerge size={17} />
+          <span>
+            <strong>对齐关系</strong>
+            <small>跨地图对应</small>
+          </span>
+          <em>{viewCount('alignments', tree, overview)}</em>
+        </button>
+      </section>
+
+      <SecondaryNavGroup title="代码视角" icon={FileSearch} items={codeViews} view={view} onSelect={onSelect} tree={tree} overview={overview} />
+      <SecondaryNavGroup title="同步工具" icon={GitBranch} items={syncViews} view={view} onSelect={onSelect} tree={tree} overview={overview} />
+    </nav>
+  );
+}
+
+function HierarchyStep({
+  active,
+  icon: Icon,
+  level,
+  title,
+  primary,
+  secondary,
+  count,
+  onSelect
+}: {
+  active: boolean;
+  icon: LucideIcon;
+  level: string;
+  title: string;
+  primary: string;
+  secondary: string;
+  count: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button type="button" className={active ? 'hierarchyStep active' : 'hierarchyStep'} onClick={onSelect} aria-current={active ? 'page' : undefined}>
+      <span className="stepIndex">{level}</span>
+      <span className="stepIcon">
+        <Icon size={16} />
+      </span>
+      <span className="stepCopy">
+        <strong>{title}</strong>
+        <small>{primary}</small>
+        {secondary ? <em>{secondary}</em> : null}
+      </span>
+      <span className="stepCount">{count}</span>
+    </button>
+  );
+}
+
+function SecondaryNavGroup({
+  title,
+  icon: Icon,
+  items,
+  view,
+  onSelect,
+  tree,
+  overview
+}: {
+  title: ViewMeta['group'];
+  icon: LucideIcon;
+  items: ViewMeta[];
+  view: View;
+  onSelect: (view: View) => void;
+  tree: ProjectTree | null;
+  overview: Overview | null;
+}) {
+  return (
+    <section className="navGroup compact">
+      <header>
+        <Icon size={15} />
+        <span>{title}</span>
+      </header>
+      <div>
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button key={item.id} type="button" className={view === item.id ? 'tab active' : 'tab'} onClick={() => onSelect(item.id)} aria-current={view === item.id ? 'page' : undefined}>
+              <Icon size={17} />
+              <span>{item.label}</span>
+              <small>{viewCount(item.id, tree, overview)}</small>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function viewCount(view: View, tree: ProjectTree | null, overview: Overview | null): string {
+  if (view === 'overview') return String(overview?.totals.projects ?? 0);
+  if (!tree) return '0';
+  if (view === 'maps') return String(tree.maps.length);
+  if (view === 'features') return String(tree.maps.reduce((count, map) => count + flattenFeatures(map.features ?? []).length, 0));
+  if (view === 'entryPoints') return String(tree.entryPoints.length);
+  if (view === 'references') return String(tree.codeReferences.length);
+  if (view === 'alignments') return String(tree.alignments.length);
+  return String(mcpToolGroups.reduce((count, group) => count + group.tools.length, 0));
 }
 
 function OverviewView({
@@ -364,15 +531,16 @@ function MapView({
   return (
     <section className="content workbench">
       <div className="workMain">
-        <div className="sectionHeader">
-          <h2>功能地图</h2>
-          <span>{tree.maps.length} 个</span>
+        <WorkbenchHeader icon={MapIcon} title="功能地图" count={`${tree.maps.length} 个`} />
+        <div className="workSurface">
+          <MapRows maps={tree.maps} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
         </div>
-        <MapRows maps={tree.maps} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
       </div>
       <aside className="workSide">
         <MapDetail tree={tree} map={selected} labels={labels} />
-        <MapCreator projectId={tree.project.id} onCreated={onCreated} />
+        <CreatorSlot label="新建功能地图">
+          <MapCreator projectId={tree.project.id} onCreated={onCreated} />
+        </CreatorSlot>
       </aside>
     </section>
   );
@@ -383,7 +551,6 @@ function FeatureTreeView({
   labels,
   keyword,
   setKeyword,
-  filteredFeatures,
   selectedFeatureId,
   selectedMapId,
   expandedFeatureIds,
@@ -396,7 +563,6 @@ function FeatureTreeView({
   labels: Catalog['labels'] | undefined;
   keyword: string;
   setKeyword: (value: string) => void;
-  filteredFeatures: Feature[];
   selectedFeatureId: string;
   selectedMapId: string;
   expandedFeatureIds: Set<string>;
@@ -405,54 +571,93 @@ function FeatureTreeView({
   onToggle: (featureId: string) => void;
   onCreated: () => Promise<void>;
 }) {
-  const selected = tree.maps.flatMap((map) => flattenFeatures(map.features ?? [])).find((feature) => feature.id === selectedFeatureId);
+  const selectedMap = tree.maps.find((map) => map.id === selectedMapId) ?? tree.maps[0];
+  const selectedMapFeatures = selectedMap ? flattenFeatures(selectedMap.features ?? []) : [];
+  const selected = selectedMapFeatures.find((feature) => feature.id === selectedFeatureId) ?? selectedMapFeatures[0];
+  const filteredFeatures = keyword.trim()
+    ? selectedMapFeatures.filter((feature) => {
+        const value = keyword.trim().toLowerCase();
+        return `${feature.name} ${feature.stableKey} ${feature.description} ${feature.tags?.join(' ')}`.toLowerCase().includes(value);
+      })
+    : selectedMapFeatures;
+  const featureCount = tree.maps.reduce((count, map) => count + flattenFeatures(map.features ?? []).length, 0);
   const alignments = selected ? tree.alignments.filter((alignment) => alignment.members.some((member) => member.targetType === 'feature' && member.targetId === selected.id)) : [];
   return (
     <section className="content workbench">
       <div className="workMain">
-        <div className="sectionHeader">
-          <h2>功能树</h2>
-          <label className="search">
-            <Search size={16} />
-            <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索功能、稳定键、说明" />
-          </label>
+        <WorkbenchHeader
+          icon={Network}
+          title="功能树"
+          count={`${featureCount} 个`}
+          action={
+            <label className="search">
+              <Search size={16} />
+              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索功能、稳定键、说明" />
+            </label>
+          }
+        />
+        <div className="workSurface featureWorkspace">
+          <div className="drilldownLayout">
+            <aside className="mapDrilldown" aria-label="功能地图">
+              {tree.maps.map((map) => {
+                const count = flattenFeatures(map.features ?? []).length;
+                return (
+                  <button key={map.id} type="button" className={map.id === selectedMap?.id ? 'active' : ''} onClick={() => onSelectMap(map.id)}>
+                    <MapIcon size={16} />
+                    <span>
+                      <strong>{map.name}</strong>
+                      <small>{map.stableKey}</small>
+                    </span>
+                    <em>{count}</em>
+                  </button>
+                );
+              })}
+              {tree.maps.length === 0 ? <EmptyState title="暂无功能地图" /> : null}
+            </aside>
+            <section className="featureTreePanel">
+              {selectedMap ? (
+                <>
+                  <div className="featureTreeHeader">
+                    <span>{labels?.mapAxis[selectedMap.axis] ?? selectedMap.axis}</span>
+                    <strong>{selectedMap.name}</strong>
+                    <small>{selectedMap.stableKey}</small>
+                  </div>
+                  {keyword ? (
+                    <div className="listPanel">
+                      {filteredFeatures.map((feature) => (
+                        <FeatureResultRow key={feature.id} feature={feature} labels={labels} selected={feature.id === selected?.id} onSelect={onSelectFeature} />
+                      ))}
+                      {filteredFeatures.length === 0 ? <EmptyState title="没有匹配功能" /> : null}
+                    </div>
+                  ) : (
+                    <div className="featureForest">
+                      {(selectedMap.features ?? []).map((feature) => (
+                        <FeatureNode
+                          key={feature.id}
+                          feature={feature}
+                          labels={labels}
+                          selectedFeatureId={selected?.id ?? selectedFeatureId}
+                          expandedFeatureIds={expandedFeatureIds}
+                          onSelect={onSelectFeature}
+                          onToggle={onToggle}
+                        />
+                      ))}
+                      {(selectedMap.features ?? []).length === 0 ? <p className="emptyInline">暂无功能</p> : null}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <EmptyState title="暂无功能地图" />
+              )}
+            </section>
+          </div>
         </div>
-        {keyword ? (
-          <div className="listPanel">
-            {filteredFeatures.map((feature) => (
-              <FeatureResultRow key={feature.id} feature={feature} labels={labels} selected={feature.id === selectedFeatureId} onSelect={onSelectFeature} />
-            ))}
-            {filteredFeatures.length === 0 ? <EmptyState title="没有匹配功能" /> : null}
-          </div>
-        ) : (
-          <div className="mapBlocks">
-            {tree.maps.map((map) => (
-              <section className="mapBlock" key={map.id}>
-                <button type="button" className={map.id === selectedMapId ? 'mapBlockHeader active' : 'mapBlockHeader'} onClick={() => onSelectMap(map.id)}>
-                  <strong>{map.name}</strong>
-                  <span>{labels?.mapAxis[map.axis] ?? map.axis}</span>
-                  <small>{map.stableKey}</small>
-                </button>
-                {(map.features ?? []).map((feature) => (
-                  <FeatureNode
-                    key={feature.id}
-                    feature={feature}
-                    labels={labels}
-                    selectedFeatureId={selectedFeatureId}
-                    expandedFeatureIds={expandedFeatureIds}
-                    onSelect={onSelectFeature}
-                    onToggle={onToggle}
-                  />
-                ))}
-                {(map.features ?? []).length === 0 ? <p className="emptyInline">暂无功能</p> : null}
-              </section>
-            ))}
-          </div>
-        )}
       </div>
       <aside className="workSide">
         <FeatureDetail tree={tree} feature={selected} labels={labels} alignments={alignments} />
-        <FeatureCreator tree={tree} selectedMapId={selectedMapId} onCreated={onCreated} />
+        <CreatorSlot label="新建功能">
+          <FeatureCreator tree={tree} selectedMapId={selectedMapId} onCreated={onCreated} />
+        </CreatorSlot>
       </aside>
     </section>
   );
@@ -475,15 +680,16 @@ function EntryPointView({
   return (
     <section className="content workbench">
       <div className="workMain">
-        <div className="sectionHeader">
-          <h2>入口文件</h2>
-          <span>{tree.entryPoints.length} 个</span>
+        <WorkbenchHeader icon={FileCode2} title="入口文件" count={`${tree.entryPoints.length} 个`} />
+        <div className="workSurface">
+          <EntryPointRows entryPoints={tree.entryPoints} tree={tree} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
         </div>
-        <EntryPointRows entryPoints={tree.entryPoints} tree={tree} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
       </div>
       <aside className="workSide">
         <EntryPointDetail entryPoint={selected} tree={tree} labels={labels} />
-        <EntryPointCreator tree={tree} onCreated={onCreated} />
+        <CreatorSlot label="新建入口文件">
+          <EntryPointCreator tree={tree} onCreated={onCreated} />
+        </CreatorSlot>
       </aside>
     </section>
   );
@@ -506,15 +712,16 @@ function CodeReferenceView({
   return (
     <section className="content workbench">
       <div className="workMain">
-        <div className="sectionHeader">
-          <h2>代码引用</h2>
-          <span>{tree.codeReferences.length} 个</span>
+        <WorkbenchHeader icon={Code2} title="代码引用" count={`${tree.codeReferences.length} 个`} />
+        <div className="workSurface">
+          <CodeReferenceRows references={tree.codeReferences} tree={tree} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
         </div>
-        <CodeReferenceRows references={tree.codeReferences} tree={tree} labels={labels} selectedId={selected?.id} onSelect={onSelect} />
       </div>
       <aside className="workSide">
         <CodeReferenceDetail reference={selected} tree={tree} labels={labels} />
-        <CodeReferenceCreator tree={tree} onCreated={onCreated} />
+        <CreatorSlot label="新建代码引用">
+          <CodeReferenceCreator tree={tree} onCreated={onCreated} />
+        </CreatorSlot>
       </aside>
     </section>
   );
@@ -537,11 +744,9 @@ function AlignmentView({
   return (
     <section className="content workbench">
       <div className="workMain">
-        <div className="sectionHeader">
-          <h2>对齐关系</h2>
-          <span>{tree.alignments.length} 条</span>
-        </div>
-        <div className="alignmentList">
+        <WorkbenchHeader icon={GitMerge} title="对齐关系" count={`${tree.alignments.length} 条`} />
+        <div className="workSurface alignmentSurface">
+          <div className="alignmentList">
           {tree.alignments.map((alignment) => (
             <button key={alignment.id} type="button" className={alignment.id === selected?.id ? 'alignment active' : 'alignment'} onClick={() => onSelect(alignment.id)}>
               <header>
@@ -560,11 +765,14 @@ function AlignmentView({
             </button>
           ))}
           {tree.alignments.length === 0 ? <EmptyState title="暂无对齐关系" /> : null}
+          </div>
         </div>
       </div>
       <aside className="workSide">
         <AlignmentDetail alignment={selected} labels={labels} />
-        <AlignmentCreator tree={tree} onCreated={onCreated} />
+        <CreatorSlot label="建立对齐关系">
+          <AlignmentCreator tree={tree} onCreated={onCreated} />
+        </CreatorSlot>
       </aside>
     </section>
   );
@@ -603,6 +811,35 @@ POST /api/mcp/call
   "arguments": { "projectId": "proj_your_app", "types": ["map", "entry_point"], "keyword": "backend.bots", "limit": 100 }
 }`}</pre>
     </section>
+  );
+}
+
+function WorkbenchHeader({ icon: Icon, title, count, action }: { icon: LucideIcon; title: string; count: string; action?: ReactNode }) {
+  return (
+    <div className="workHeader">
+      <div>
+        <span className="workIcon">
+          <Icon size={18} />
+        </span>
+        <h2>{title}</h2>
+        <small>{count}</small>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function CreatorSlot({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={open ? 'creatorSlot open' : 'creatorSlot'}>
+      <button type="button" className="creatorToggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+        <Plus size={16} />
+        <span>{label}</span>
+        <ChevronDown size={15} />
+      </button>
+      {open ? <div className="creatorBody">{children}</div> : null}
+    </div>
   );
 }
 
@@ -708,7 +945,7 @@ function MapDetail({ tree, map, labels }: { tree: ProjectTree; map: FuncMap | un
   const entryCount = tree.entryPoints.filter((entryPoint) => entryPoint.mapId === map.id).length;
   const referenceCount = tree.codeReferences.filter((reference) => reference.mapId === map.id).length;
   return (
-    <section className="panel">
+    <section className="panel inspectorPanel">
       <div className="sectionHeader">
         <h2>{map.name}</h2>
         <span>{labels?.mapAxis[map.axis] ?? map.axis}</span>
@@ -746,7 +983,7 @@ function FeatureDetail({
 }) {
   if (!feature) return <EmptyState title="未选择功能" />;
   return (
-    <section className="panel">
+    <section className="panel inspectorPanel">
       <div className="sectionHeader">
         <h2>{feature.name}</h2>
         <span>{labels?.featureStatus[feature.status] ?? feature.status}</span>
@@ -778,7 +1015,7 @@ function FeatureDetail({
 function EntryPointDetail({ entryPoint, tree, labels }: { entryPoint: EntryPoint | undefined; tree: ProjectTree; labels: Catalog['labels'] | undefined }) {
   if (!entryPoint) return <EmptyState title="未选择入口文件" />;
   return (
-    <section className="panel">
+    <section className="panel inspectorPanel">
       <div className="sectionHeader">
         <h2>{entryPoint.name}</h2>
         <span>{labels?.entryPointKind[entryPoint.kind] ?? entryPoint.kind}</span>
@@ -800,7 +1037,7 @@ function EntryPointDetail({ entryPoint, tree, labels }: { entryPoint: EntryPoint
 function CodeReferenceDetail({ reference, tree, labels }: { reference: CodeReference | undefined; tree: ProjectTree; labels: Catalog['labels'] | undefined }) {
   if (!reference) return <EmptyState title="未选择代码引用" />;
   return (
-    <section className="panel">
+    <section className="panel inspectorPanel">
       <div className="sectionHeader">
         <h2>{reference.symbol || reference.path}</h2>
         <span>{labels?.codeReferenceKind[reference.kind] ?? reference.kind}</span>
@@ -825,7 +1062,7 @@ function CodeReferenceDetail({ reference, tree, labels }: { reference: CodeRefer
 function AlignmentDetail({ alignment, labels }: { alignment: Alignment | undefined; labels: Catalog['labels'] | undefined }) {
   if (!alignment) return <EmptyState title="未选择对齐关系" />;
   return (
-    <section className="panel">
+    <section className="panel inspectorPanel">
       <div className="sectionHeader">
         <h2>{alignment.name}</h2>
         <span>{labels?.alignmentStatus[alignment.status] ?? alignment.status}</span>
