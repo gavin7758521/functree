@@ -1,6 +1,6 @@
 # 变更记录
 
-## Unreleased
+## 0.4.0
 
 - `functree_query_context` 新增 `view: "lite"`、`includeSummaryOnly`、`includeMembers`、`includeMetadata`、`mapStableKey` 和 `pathMode`，降低大项目上下文体积。
 - 新增 `functree_resolve_stable_keys`、`functree_project_summary`、`functree_query_path_context`。
