@@ -13,7 +13,8 @@ export const FeatureStatusSchema = z.enum([
   'released',
   'archived',
   'deprecated',
-  'blocked'
+  'blocked',
+  'mock_only'
 ]);
 export const FeatureKindSchema = z.enum([
   'capability',
@@ -67,15 +68,40 @@ export const AlignmentRelationSchema = z.enum([
   'conflicts_with',
   'covers',
   'decomposes_to',
-  'related_to'
+  'related_to',
+  'frontend_implements',
+  'backend_implements',
+  'sdk_exposes',
+  'ops_deploys',
+  'stores_data_for',
+  'guards_permission_for',
+  'mock_represents',
+  'deprecated_by',
+  'requires',
+  'breaks_if_changed'
 ]);
 export const AlignmentStatusSchema = z.enum(['proposed', 'confirmed', 'rejected', 'stale']);
 export const AlignmentRoleSchema = z.enum(['source', 'target', 'peer', 'evidence']);
-export const QueryContextTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+export const EvidenceTypeSchema = z.enum(['code_fact', 'doc_claim', 'inferred', 'planned', 'mock_only', 'deprecated']);
+export const EvidenceTargetTypeSchema = z.enum(['map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+export const CodeReferenceRoleInFeatureSchema = z.enum([
+  'entry',
+  'core_logic',
+  'permission_check',
+  'storage',
+  'rendering',
+  'configuration',
+  'test',
+  'contract',
+  'adapter',
+  'other'
+]);
+export const QueryContextTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence']);
 export const QueryContextViewSchema = z.enum(['full', 'lite']);
 export const PathMatchModeSchema = z.enum(['contains', 'exact', 'prefix']);
 export const ResolveStableKeyTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
 export const ScanRunStatusSchema = z.enum(['running', 'completed', 'failed', 'cancelled']);
+export const ProgrammingContextIncludeSchema = z.enum(['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality']);
 
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export type MapAxis = z.infer<typeof MapAxisSchema>;
@@ -90,11 +116,15 @@ export type AlignableType = z.infer<typeof AlignableTypeSchema>;
 export type AlignmentRelation = z.infer<typeof AlignmentRelationSchema>;
 export type AlignmentStatus = z.infer<typeof AlignmentStatusSchema>;
 export type AlignmentRole = z.infer<typeof AlignmentRoleSchema>;
+export type EvidenceType = z.infer<typeof EvidenceTypeSchema>;
+export type EvidenceTargetType = z.infer<typeof EvidenceTargetTypeSchema>;
+export type CodeReferenceRoleInFeature = z.infer<typeof CodeReferenceRoleInFeatureSchema>;
 export type QueryContextType = z.infer<typeof QueryContextTypeSchema>;
 export type QueryContextView = z.infer<typeof QueryContextViewSchema>;
 export type PathMatchMode = z.infer<typeof PathMatchModeSchema>;
 export type ResolveStableKeyType = z.infer<typeof ResolveStableKeyTypeSchema>;
 export type ScanRunStatus = z.infer<typeof ScanRunStatusSchema>;
+export type ProgrammingContextInclude = z.infer<typeof ProgrammingContextIncludeSchema>;
 
 const IdSchema = z
   .string()
@@ -108,6 +138,14 @@ const OptionalShortTextSchema = z.string().trim().max(200).optional().default(''
 const VersionSchema = z.string().trim().min(1).max(80).default('当前');
 const MetadataSchema = z.record(z.string(), z.unknown()).optional().default({});
 const TagsSchema = z.array(z.string().trim().min(1).max(60)).max(40).optional().default([]);
+const DetailListSchema = z.array(z.string().trim().min(1).max(800)).max(80).optional().default([]);
+const BooleanQuerySchema = z.preprocess((value) => {
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return value;
+}, z.boolean());
 export const QUERY_CONTEXT_MAX_LIMIT = 200;
 const StableKeySchema = z.string().trim().min(1).max(180);
 const PathSchema = z.string().trim().min(1).max(600);
@@ -118,6 +156,24 @@ const CommitShaSchema = z
   .max(64)
   .regex(/^[0-9a-fA-F]+$/u, 'commitSha 必须是 7 到 64 位十六进制 Git commit。');
 const DryRunSchema = z.boolean().optional().default(false);
+
+export const FeatureDetailSchema = z.object({
+  intent: OptionalTextSchema,
+  currentBehavior: OptionalTextSchema,
+  expectedBehavior: OptionalTextSchema,
+  scope: OptionalTextSchema,
+  knownGaps: DetailListSchema,
+  openQuestions: DetailListSchema,
+  acceptanceCriteria: DetailListSchema,
+  risks: DetailListSchema,
+  blocker: OptionalTextSchema,
+  replacement: OptionalTextSchema,
+  deprecatedReason: OptionalTextSchema,
+  mockBoundary: OptionalTextSchema,
+  detailsMarkdown: z.string().trim().max(20000).optional().default(''),
+  lastVerifiedAt: z.string().trim().max(80).optional().default(''),
+  lastVerifiedCommit: CommitShaSchema.optional()
+});
 
 export const CreateProjectSchema = z.object({
   id: IdSchema.optional(),
@@ -163,6 +219,7 @@ export const CreateFeatureSchema = z.object({
   description: OptionalTextSchema,
   sortOrder: z.number().int().min(0).max(100000).optional().default(0),
   tags: TagsSchema,
+  details: FeatureDetailSchema.optional(),
   metadata: MetadataSchema,
   dryRun: DryRunSchema
 });
@@ -207,6 +264,10 @@ export const CreateCodeReferenceSchema = z.object({
   symbol: OptionalShortTextSchema,
   kind: CodeReferenceKindSchema,
   description: OptionalTextSchema,
+  roleInFeature: CodeReferenceRoleInFeatureSchema.optional(),
+  changeGuidance: z.string().trim().max(8000).optional(),
+  verificationHint: z.string().trim().max(4000).optional(),
+  blastRadius: z.string().trim().max(2000).optional(),
   lineStart: z.number().int().min(1).max(1000000).nullable().optional().default(null),
   lineEnd: z.number().int().min(1).max(1000000).nullable().optional().default(null),
   scanRunId: IdSchema.optional(),
@@ -245,14 +306,42 @@ export const CreateAlignmentSchema = z.object({
 
 export const UpdateAlignmentSchema = CreateAlignmentSchema.partial().omit({ id: true, projectId: true, dryRun: true });
 
+const CreateEvidenceBaseSchema = z.object({
+  id: IdSchema.optional(),
+  projectId: IdSchema.optional(),
+  targetType: EvidenceTargetTypeSchema,
+  targetId: IdSchema.optional(),
+  targetStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  version: z.string().trim().min(1).max(80).optional(),
+  evidenceType: EvidenceTypeSchema,
+  path: PathSchema.optional(),
+  symbol: OptionalShortTextSchema,
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional().default(null),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional().default(null),
+  summary: OptionalTextSchema,
+  confidence: z.number().min(0).max(1).optional().default(1),
+  commitSha: CommitShaSchema.optional(),
+  verifiedAt: z.string().trim().max(80).optional().default(''),
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
+});
+
+export const CreateEvidenceSchema = CreateEvidenceBaseSchema.refine((input) => Boolean(input.targetId || input.targetStableKey), {
+  message: 'evidence 需要 targetId 或 targetStableKey。',
+  path: ['targetId']
+});
+
 export const QueryContextSchema = z.object({
   projectId: IdSchema.optional(),
   keyword: z.string().trim().max(120).optional().default(''),
-  types: z.array(QueryContextTypeSchema).min(1).max(6).optional(),
+  types: z.array(QueryContextTypeSchema).min(1).max(7).optional(),
   view: QueryContextViewSchema.optional().default('full'),
-  includeSummaryOnly: z.boolean().optional().default(false),
-  includeMembers: z.boolean().optional().default(true),
-  includeMetadata: z.boolean().optional().default(true),
+  includeSummaryOnly: BooleanQuerySchema.optional().default(false),
+  includeMembers: BooleanQuerySchema.optional().default(true),
+  includeMetadata: BooleanQuerySchema.optional().default(true),
+  includeDetails: BooleanQuerySchema.optional().default(false),
   mapId: IdSchema.optional(),
   mapStableKey: StableKeySchema.optional(),
   stableKey: z.string().trim().min(1).max(180).optional(),
@@ -316,6 +405,12 @@ export const BatchAlignmentSchema = z.object({
   items: z.array(CreateAlignmentSchema.omit({ projectId: true, dryRun: true })).min(1).max(100)
 });
 
+export const BatchEvidenceSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateEvidenceBaseSchema.omit({ projectId: true, dryRun: true })).min(1).max(500)
+});
+
 export const ResolveStableKeyItemSchema = z.object({
   type: ResolveStableKeyTypeSchema,
   id: IdSchema.optional(),
@@ -340,12 +435,41 @@ export const ProjectSummarySchema = z.object({
   projectId: IdSchema
 });
 
+export const ProgrammingContextSchema = z.object({
+  projectId: IdSchema,
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
+  depth: z.number().int().min(0).max(3).optional().default(1),
+  include: z.array(ProgrammingContextIncludeSchema).min(1).max(8).optional().default([
+    'entryPoints',
+    'codeReferences',
+    'alignments',
+    'risks',
+    'acceptanceCriteria',
+    'evidence',
+    'details',
+    'quality'
+  ])
+}).refine((input) => Boolean(input.featureId || input.featureStableKey), {
+  message: 'programming context 需要 featureId 或 featureStableKey。',
+  path: ['featureId']
+});
+
+export const QualityReportSchema = z.object({
+  projectId: IdSchema,
+  repoRoot: z.string().trim().max(800).optional(),
+  includePathChecks: BooleanQuerySchema.optional().default(false)
+});
+
 export const QueryPathContextSchema = z.object({
   projectId: IdSchema,
   path: PathSchema,
   pathMode: PathMatchModeSchema.optional().default('contains'),
-  includeAlignments: z.boolean().optional().default(true),
-  includeReferences: z.boolean().optional().default(true)
+  includeAlignments: BooleanQuerySchema.optional().default(true),
+  includeReferences: BooleanQuerySchema.optional().default(true)
 });
 
 export const BeginScanSchema = z.object({
@@ -373,14 +497,18 @@ export type CreateFeatureInput = z.input<typeof CreateFeatureSchema>;
 export type CreateEntryPointInput = z.input<typeof CreateEntryPointSchema>;
 export type CreateCodeReferenceInput = z.input<typeof CreateCodeReferenceSchema>;
 export type CreateAlignmentInput = z.input<typeof CreateAlignmentSchema>;
+export type CreateEvidenceInput = z.input<typeof CreateEvidenceSchema>;
 export type QueryContextInput = z.input<typeof QueryContextSchema>;
 export type BatchMapInput = z.input<typeof BatchMapSchema>;
 export type BatchFeatureInput = z.input<typeof BatchFeatureSchema>;
 export type BatchEntryPointInput = z.input<typeof BatchEntryPointSchema>;
 export type BatchCodeReferenceInput = z.input<typeof BatchCodeReferenceSchema>;
 export type BatchAlignmentInput = z.input<typeof BatchAlignmentSchema>;
+export type BatchEvidenceInput = z.input<typeof BatchEvidenceSchema>;
 export type ResolveStableKeysInput = z.input<typeof ResolveStableKeysSchema>;
 export type ProjectSummaryInput = z.input<typeof ProjectSummarySchema>;
+export type ProgrammingContextInput = z.input<typeof ProgrammingContextSchema>;
+export type QualityReportInput = z.input<typeof QualityReportSchema>;
 export type QueryPathContextInput = z.input<typeof QueryPathContextSchema>;
 export type BeginScanInput = z.input<typeof BeginScanSchema>;
 export type FinishScanInput = z.input<typeof FinishScanSchema>;
@@ -441,7 +569,8 @@ export const labels = {
     released: '已上线',
     archived: '已归档',
     deprecated: '已废弃',
-    blocked: '阻塞中'
+    blocked: '阻塞中',
+    mock_only: '仅 Mock'
   } satisfies Record<FeatureStatus, string>,
   entryPointKind: {
     app_root: '应用入口',
@@ -480,14 +609,44 @@ export const labels = {
     conflicts_with: '冲突',
     covers: '覆盖',
     decomposes_to: '拆解',
-    related_to: '关联'
+    related_to: '关联',
+    frontend_implements: '前端实现',
+    backend_implements: '后端实现',
+    sdk_exposes: 'SDK 暴露',
+    ops_deploys: '运维部署',
+    stores_data_for: '存储数据',
+    guards_permission_for: '权限保护',
+    mock_represents: 'Mock 表示',
+    deprecated_by: '被替代',
+    requires: '需要',
+    breaks_if_changed: '变更会破坏'
   } satisfies Record<AlignmentRelation, string>,
   alignmentStatus: {
     proposed: '待确认',
     confirmed: '已确认',
     rejected: '已拒绝',
     stale: '已过期'
-  } satisfies Record<AlignmentStatus, string>
+  } satisfies Record<AlignmentStatus, string>,
+  evidenceType: {
+    code_fact: '代码事实',
+    doc_claim: '文档声称',
+    inferred: '推断',
+    planned: '计划',
+    mock_only: '仅 Mock',
+    deprecated: '废弃'
+  } satisfies Record<EvidenceType, string>,
+  codeReferenceRoleInFeature: {
+    entry: '入口',
+    core_logic: '核心逻辑',
+    permission_check: '权限检查',
+    storage: '存储',
+    rendering: '渲染',
+    configuration: '配置',
+    test: '测试',
+    contract: '契约',
+    adapter: '适配',
+    other: '其他'
+  } satisfies Record<CodeReferenceRoleInFeature, string>
 };
 
 export function newId(prefix: string): string {

@@ -4,15 +4,19 @@ import {
   BatchEntryPointSchema,
   BatchFeatureSchema,
   BatchMapSchema,
+  BatchEvidenceSchema,
   BeginScanSchema,
   CreateAlignmentSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
+  CreateEvidenceSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
   FinishScanSchema,
+  ProgrammingContextSchema,
   ProjectSummarySchema,
+  QualityReportSchema,
   QueryPathContextSchema,
   QueryContextSchema,
   ResolveStableKeysSchema
@@ -43,7 +47,12 @@ export const toolDefinitions = [
   {
     name: 'functree_upsert_code_reference',
     title: '写入代码引用',
-    description: '记录功能、入口或地图对应的文件、函数、组件、路由、表、迁移、配置或测试引用，可用 stableKey 或路径签名去重。'
+    description: '记录功能、入口或地图对应的文件、函数、组件、路由、表、迁移、配置或测试引用，可写入 roleInFeature、changeGuidance、verificationHint 和 blastRadius。'
+  },
+  {
+    name: 'functree_upsert_evidence',
+    title: '写入证据',
+    description: '给 feature/map/alignment/entry_point/code_reference 写入一等证据，区分 code_fact、doc_claim、inferred、planned、mock_only、deprecated。'
   },
   {
     name: 'functree_upsert_alignment',
@@ -76,6 +85,11 @@ export const toolDefinitions = [
     description: '在同一项目下批量 upsert 对齐关系，支持 dryRun，并按 id、stableKey 或成员集合去重。'
   },
   {
+    name: 'functree_upsert_evidence_batch',
+    title: '批量写入证据',
+    description: '在同一项目下批量 upsert 证据，支持 dryRun，并按目标、证据类型、路径、符号、行号和 commit 去重。'
+  },
+  {
     name: 'functree_query_context',
     title: '查询上下文',
     description: '只读查询 FuncTree 项目、功能地图、功能、入口文件、代码引用和对齐关系，支持 lite 轻量模式、summaryOnly、includeMembers、keyword、types、stableKey、mapId/mapStableKey、path、offset/cursor 与统计摘要。'
@@ -89,6 +103,16 @@ export const toolDefinitions = [
     name: 'functree_project_summary',
     title: '项目摘要',
     description: '只读返回项目级统计、最近扫描、stableKey 冲突和孤儿代码引用数量，供大规模同步后确认。'
+  },
+  {
+    name: 'functree_get_programming_context',
+    title: '获取 AI 编程上下文',
+    description: '只读按 feature 组织编程上下文，返回必读入口、关键实现文件、对齐关系、影响功能、风险、验收条件、证据和质量问题。'
+  },
+  {
+    name: 'functree_quality_report',
+    title: '项目质量报告',
+    description: '只读返回缺少代码引用、缺少对齐、缺少代码事实证据、未稳定功能详情不足和失效路径等报告。'
   },
   {
     name: 'functree_query_path_context',
@@ -142,6 +166,13 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
       }
       return repo.upsertCodeReference(input.projectId, input);
     }
+    case 'functree_upsert_evidence': {
+      const input = CreateEvidenceSchema.parse(args);
+      if (!input.projectId) {
+        throw new ValidationError('projectId 必填。');
+      }
+      return repo.upsertEvidence(input.projectId, input);
+    }
     case 'functree_upsert_alignment': {
       const input = CreateAlignmentSchema.parse(args);
       if (!input.projectId) {
@@ -164,6 +195,9 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     case 'functree_upsert_alignments_batch': {
       return repo.upsertAlignmentsBatch(BatchAlignmentSchema.parse(args));
     }
+    case 'functree_upsert_evidence_batch': {
+      return repo.upsertEvidenceBatch(BatchEvidenceSchema.parse(args));
+    }
     case 'functree_query_context': {
       return repo.queryContext(QueryContextSchema.parse(args));
     }
@@ -172,6 +206,12 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     }
     case 'functree_project_summary': {
       return repo.projectSummary(ProjectSummarySchema.parse(args));
+    }
+    case 'functree_get_programming_context': {
+      return repo.programmingContext(ProgrammingContextSchema.parse(args));
+    }
+    case 'functree_quality_report': {
+      return repo.qualityReport(QualityReportSchema.parse(args));
     }
     case 'functree_query_path_context': {
       return repo.queryPathContext(QueryPathContextSchema.parse(args));

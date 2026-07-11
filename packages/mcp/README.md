@@ -54,6 +54,9 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_code_reference]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_evidence]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
@@ -69,6 +72,9 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_code_references_batch]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_evidence_batch]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
 
@@ -79,31 +85,35 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-`functree_query_context`, `functree_resolve_stable_keys`, `functree_project_summary`, and `functree_query_path_context` are read-only.
+`functree_query_context`, `functree_resolve_stable_keys`, `functree_project_summary`, `functree_get_programming_context`, `functree_quality_report`, and `functree_query_path_context` are read-only.
 
 ## Tools
 
 - `functree_create_project`: create or update a FuncTree project.
 - `functree_upsert_map`: create or update a project map by `id` or `stableKey`.
-- `functree_upsert_feature`: create or update a feature under a map by `id` or `stableKey` + `version`; accepts `mapId` or `projectId + mapStableKey`.
+- `functree_upsert_feature`: create or update a feature under a map by `id` or `stableKey` + `version`; accepts `mapId` or `projectId + mapStableKey`; supports structured `details` for intent, current/expected behavior, scope, gaps, acceptance criteria, risks, and verification commit.
 - `functree_upsert_entry_point`: create or update an analysis entry point; accepts `mapStableKey` and `scanRunId`.
-- `functree_upsert_code_reference`: create or update a code reference by `id`, `stableKey`, or path signature; accepts `mapStableKey`, `featureStableKey`, `entryPointStableKey`, and `scanRunId`.
+- `functree_upsert_code_reference`: create or update a code reference by `id`, `stableKey`, or path signature; accepts `mapStableKey`, `featureStableKey`, `entryPointStableKey`, `scanRunId`, `roleInFeature`, `changeGuidance`, `verificationHint`, and `blastRadius`.
+- `functree_upsert_evidence`: create or update evidence for a map, feature, alignment, entry point, or code reference; distinguishes `code_fact`, `doc_claim`, `inferred`, `planned`, `mock_only`, and `deprecated`.
 - `functree_upsert_alignment`: create or update a cross-layer alignment relation by `id`, `stableKey`, or member set. Members can use `targetId` or stable keys.
 - `functree_upsert_maps_batch`: batch upsert maps with `dryRun` and per-item errors.
 - `functree_upsert_features_batch`: batch upsert features across one or more maps with `dryRun` and rollback on write failure.
 - `functree_upsert_entry_points_batch`: batch upsert entry points.
 - `functree_upsert_code_references_batch`: batch upsert code references.
+- `functree_upsert_evidence_batch`: batch upsert evidence with `dryRun`, per-item errors, and summary counts.
 - `functree_upsert_alignments_batch`: batch upsert alignments with member-set de-duplication.
-- `functree_query_context`: read project, map, feature, entry point, code reference, and alignment context with filters, `view: "lite"`, summary-only mode, and cursor pagination.
+- `functree_query_context`: read project, map, feature, entry point, code reference, evidence, and alignment context with filters, `view: "lite"`, `includeDetails`, summary-only mode, and cursor pagination.
 - `functree_resolve_stable_keys`: resolve stable keys to concrete IDs in bulk.
 - `functree_project_summary`: read project counts, latest scan, conflicts, and orphan reference counts.
+- `functree_get_programming_context`: read the prioritized context for changing one feature: entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, and quality issues.
+- `functree_quality_report`: read project-level coverage gaps such as missing code references, missing alignments, missing `code_fact` evidence, thin draft/in-progress details, mock boundaries, and stale paths.
 - `functree_query_path_context`: read existing entry points/code references and related objects for a path.
 - `functree_begin_scan`: record the start of a Git commit scan.
 - `functree_finish_scan`: finish a scan and store its summary.
 
 Write tools return `operation`, `changedFields`, `data`, `dryRun`, and sometimes `previewId`. `operation` is `created`, `updated`, `unchanged`, or `dry_run`. Dry-run-created IDs are prefixed with `preview_` and must not be reused as real IDs.
 
-`functree_query_context` supports `types`, `view`, `includeSummaryOnly`, `includeMembers`, `includeMetadata`, `mapId`, `mapStableKey`, `stableKey`, `alignmentId`, `parentFeatureId`, `entryPointId`, `codeReferenceId`, `path`, `pathMode`, `offset`, and `cursor`; use `page.nextCursor` to fetch the next page.
+`functree_query_context` supports `types`, `view`, `includeSummaryOnly`, `includeMembers`, `includeMetadata`, `includeDetails`, `mapId`, `mapStableKey`, `stableKey`, `alignmentId`, `parentFeatureId`, `entryPointId`, `codeReferenceId`, `path`, `pathMode`, `offset`, and `cursor`; use `page.nextCursor` to fetch the next page.
 
 ## Packaging note
 

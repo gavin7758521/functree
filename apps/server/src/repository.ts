@@ -4,15 +4,19 @@ import {
   type BatchEntryPointInput,
   type BatchFeatureInput,
   type BatchMapInput,
+  type BatchEvidenceInput,
   type BeginScanInput,
   type CreateAlignmentInput,
   type CreateCodeReferenceInput,
   type CreateEntryPointInput,
+  type CreateEvidenceInput,
   type CreateFeatureInput,
   type CreateMapInput,
   type CreateProjectInput,
   type FinishScanInput,
+  type ProgrammingContextInput,
   type ProjectSummaryInput,
+  type QualityReportInput,
   type QueryContextInput,
   type QueryContextType,
   type QueryPathContextInput,
@@ -24,19 +28,26 @@ import {
   BatchEntryPointSchema,
   BatchFeatureSchema,
   BatchMapSchema,
+  BatchEvidenceSchema,
   CreateAlignmentSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
+  CreateEvidenceSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
+  FeatureDetailSchema,
   FinishScanSchema,
+  ProgrammingContextSchema,
   ProjectSummarySchema,
+  QualityReportSchema,
   QueryPathContextSchema,
   QueryContextSchema,
   ResolveStableKeysSchema,
   newId
 } from '@functree/domain';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { SQLInputValue } from 'node:sqlite';
 import type { Db } from './database.js';
 
@@ -85,7 +96,28 @@ export type FeatureRow = {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  details?: FeatureDetailRow;
   children?: FeatureRow[];
+};
+
+export type FeatureDetailRow = {
+  featureId: string;
+  intent: string;
+  currentBehavior: string;
+  expectedBehavior: string;
+  scope: string;
+  knownGaps: string[];
+  openQuestions: string[];
+  acceptanceCriteria: string[];
+  risks: string[];
+  blocker: string;
+  replacement: string;
+  deprecatedReason: string;
+  mockBoundary: string;
+  detailsMarkdown: string;
+  lastVerifiedAt: string;
+  lastVerifiedCommit: string;
+  updatedAt: string;
 };
 
 export type EntryPointRow = {
@@ -118,6 +150,10 @@ export type CodeReferenceRow = {
   symbol: string;
   kind: string;
   description: string;
+  roleInFeature: string;
+  changeGuidance: string;
+  verificationHint: string;
+  blastRadius: string;
   lineStart: number | null;
   lineEnd: number | null;
   firstSeenScanRunId: string | null;
@@ -171,6 +207,27 @@ export type AlignmentMemberRow = {
   label?: string;
 };
 
+export type EvidenceRow = {
+  id: string;
+  projectId: string;
+  targetType: string;
+  targetId: string;
+  evidenceType: string;
+  signature: string;
+  path: string;
+  symbol: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+  summary: string;
+  confidence: number;
+  commitSha: string;
+  verifiedAt: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  label?: string;
+};
+
 export type UpsertOperation = 'created' | 'updated' | 'unchanged' | 'dry_run';
 
 export type UpsertResult<T> = {
@@ -185,6 +242,13 @@ export type BatchUpsertResult<T> = {
   success: boolean;
   dryRun: boolean;
   rolledBack: boolean;
+  summary: {
+    created: number;
+    updated: number;
+    unchanged: number;
+    dryRun: number;
+    errors: number;
+  };
   results: Array<UpsertResult<T> & { index: number }>;
   errors: Array<{
     index: number;
@@ -201,6 +265,7 @@ export type QueryContextResult = {
   alignments: Array<AlignmentRow | QueryLiteRow>;
   entryPoints: Array<EntryPointRow | QueryLiteRow>;
   codeReferences: Array<CodeReferenceRow | QueryLiteRow>;
+  evidence: Array<EvidenceRow | QueryLiteRow>;
   page: {
     limit: number;
     offset: number;
@@ -212,6 +277,7 @@ export type QueryContextResult = {
     mapCount: number;
     featureCount: number;
     alignmentCount: number;
+    evidenceCount: number;
     entryPointCount: number;
     codeReferenceCount: number;
     scanRunCount: number;
@@ -263,6 +329,51 @@ export type QueryPathContextResult = {
   maps: FeatureMapRow[];
   features: FeatureRow[];
   alignments: AlignmentRow[];
+};
+
+export type ProgrammingContextResult = {
+  project: ProjectRow;
+  map: FeatureMapRow;
+  feature: FeatureRow;
+  details: FeatureDetailRow | null;
+  requiredEntryPoints: EntryPointRow[];
+  keyCodeReferences: CodeReferenceRow[];
+  relatedProductCapabilities: FeatureRow[];
+  alignments: AlignmentRow[];
+  impactedFeatures: FeatureRow[];
+  evidence: EvidenceRow[];
+  risks: string[];
+  acceptanceCriteria: string[];
+  verification: string[];
+  qualityIssues: QualityIssue[];
+};
+
+export type QualityIssue = {
+  severity: 'error' | 'warning' | 'info';
+  code: string;
+  targetType: string;
+  targetId: string;
+  message: string;
+  hint: string;
+};
+
+export type QualityReportResult = {
+  projectId: string;
+  summary: {
+    errors: number;
+    warnings: number;
+    info: number;
+    featuresWithoutCodeReferences: number;
+    featuresWithoutAlignments: number;
+    featuresWithoutCodeEvidence: number;
+    draftDetailGaps: number;
+    inProgressDetailGaps: number;
+    blockedDetailGaps: number;
+    deprecatedDetailGaps: number;
+    mockBoundaryGaps: number;
+    missingPaths: number;
+  };
+  issues: QualityIssue[];
 };
 
 type ParsedQueryContext = ReturnType<typeof QueryContextSchema.parse>;
@@ -446,6 +557,8 @@ export class FuncTreeRepository {
     if (data.parentFeatureId === id) {
       throw new ValidationError('功能不能把自己设置为父功能。');
     }
+    const existingDetails = existing ? this.findFeatureDetailById(existing.id) : null;
+    const plannedDetails = data.details ? normalizeFeatureDetailInput(id, data.details, existingDetails, now) : undefined;
     const planned = {
       id,
       projectId: featureMap.projectId,
@@ -463,56 +576,84 @@ export class FuncTreeRepository {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     } satisfies FeatureRow;
-    const changedFields = existing
+    const changedFields = [
+      ...(existing
       ? changedFieldsFor(existing, planned, ['parentFeatureId', 'stableKey', 'name', 'version', 'status', 'kind', 'description', 'sortOrder', 'tags', 'metadata'])
-      : [];
+      : []),
+      ...(plannedDetails &&
+      (!existingDetails ||
+        changedFieldsFor(existingDetails, plannedDetails, [
+          'intent',
+          'currentBehavior',
+          'expectedBehavior',
+          'scope',
+          'knownGaps',
+          'openQuestions',
+          'acceptanceCriteria',
+          'risks',
+          'blocker',
+          'replacement',
+          'deprecatedReason',
+          'mockBoundary',
+          'detailsMarkdown',
+          'lastVerifiedAt',
+          'lastVerifiedCommit'
+        ]).length > 0)
+        ? ['details']
+        : [])
+    ];
     if (data.dryRun) {
-      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true, previewId: existing ? undefined : id };
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: plannedDetails ? { ...planned, details: plannedDetails } : planned, dryRun: true, previewId: existing ? undefined : id };
     }
     if (existing && changedFields.length === 0) {
       return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
     }
-    this.db
-      .prepare(
-        `INSERT INTO features
-          (id, project_id, map_id, parent_feature_id, stable_key, name, version, status, kind, description, sort_order, tags_json, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           parent_feature_id = excluded.parent_feature_id,
-           stable_key = excluded.stable_key,
-           name = excluded.name,
-           version = excluded.version,
-           status = excluded.status,
-           kind = excluded.kind,
-           description = excluded.description,
-           sort_order = excluded.sort_order,
-           tags_json = excluded.tags_json,
-           metadata_json = excluded.metadata_json,
-           updated_at = excluded.updated_at`
-      )
-      .run(
-        id,
-        planned.projectId,
-        mapId,
-        planned.parentFeatureId,
-        planned.stableKey,
-        planned.name,
-        planned.version,
-        planned.status,
-        planned.kind,
-        planned.description,
-        planned.sortOrder,
-        jsonArray(planned.tags),
-        json(planned.metadata),
-        now,
-        now
-      );
+    this.withSavepoint('feature', () => {
+      this.db
+        .prepare(
+          `INSERT INTO features
+            (id, project_id, map_id, parent_feature_id, stable_key, name, version, status, kind, description, sort_order, tags_json, metadata_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             parent_feature_id = excluded.parent_feature_id,
+             stable_key = excluded.stable_key,
+             name = excluded.name,
+             version = excluded.version,
+             status = excluded.status,
+             kind = excluded.kind,
+             description = excluded.description,
+             sort_order = excluded.sort_order,
+             tags_json = excluded.tags_json,
+             metadata_json = excluded.metadata_json,
+             updated_at = excluded.updated_at`
+        )
+        .run(
+          id,
+          planned.projectId,
+          mapId,
+          planned.parentFeatureId,
+          planned.stableKey,
+          planned.name,
+          planned.version,
+          planned.status,
+          planned.kind,
+          planned.description,
+          planned.sortOrder,
+          jsonArray(planned.tags),
+          json(planned.metadata),
+          now,
+          now
+        );
+      if (plannedDetails) {
+        this.writeFeatureDetails(plannedDetails);
+      }
+    });
     this.touchProject(featureMap.projectId);
     this.recordEvent(featureMap.projectId, 'http', 'upsert_feature', { id, mapId, stableKey: data.stableKey, name: data.name });
     return {
       operation: existing ? 'updated' : 'created',
       changedFields,
-      data: this.getFeature(id),
+      data: this.getFeature(id, Boolean(plannedDetails)),
       dryRun: false
     };
   }
@@ -531,12 +672,12 @@ export class FuncTreeRepository {
     });
   }
 
-  getFeature(featureId: string): FeatureRow {
+  getFeature(featureId: string, includeDetails = false): FeatureRow {
     const row = this.db.prepare('SELECT * FROM features WHERE id = ?').get(featureId);
     if (!row) {
       throw new NotFoundError(`功能不存在: ${featureId}`);
     }
-    return mapFeature(row);
+    return this.attachFeatureDetails(mapFeature(row), includeDetails);
   }
 
   listFeatures(projectId: string): FeatureRow[] {
@@ -711,6 +852,10 @@ export class FuncTreeRepository {
       symbol: data.symbol,
       kind: data.kind,
       description: data.description,
+      roleInFeature: data.roleInFeature ?? existing?.roleInFeature ?? '',
+      changeGuidance: data.changeGuidance ?? existing?.changeGuidance ?? '',
+      verificationHint: data.verificationHint ?? existing?.verificationHint ?? '',
+      blastRadius: data.blastRadius ?? existing?.blastRadius ?? '',
       lineStart: data.lineStart,
       lineEnd: data.lineEnd,
       firstSeenScanRunId: existing?.firstSeenScanRunId ?? scanRun?.id ?? null,
@@ -731,6 +876,10 @@ export class FuncTreeRepository {
           'symbol',
           'kind',
           'description',
+          'roleInFeature',
+          'changeGuidance',
+          'verificationHint',
+          'blastRadius',
           'lineStart',
           'lineEnd',
           'firstSeenScanRunId',
@@ -749,8 +898,8 @@ export class FuncTreeRepository {
     this.db
       .prepare(
         `INSERT INTO code_references
-          (id, project_id, map_id, feature_id, entry_point_id, stable_key, path, symbol, kind, description, line_start, line_end, first_seen_scan_run_id, last_seen_scan_run_id, last_seen_commit_sha, last_scanned_at, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, project_id, map_id, feature_id, entry_point_id, stable_key, path, symbol, kind, description, role_in_feature, change_guidance, verification_hint, blast_radius, line_start, line_end, first_seen_scan_run_id, last_seen_scan_run_id, last_seen_commit_sha, last_scanned_at, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            map_id = excluded.map_id,
            feature_id = excluded.feature_id,
@@ -760,6 +909,10 @@ export class FuncTreeRepository {
            symbol = excluded.symbol,
            kind = excluded.kind,
            description = excluded.description,
+           role_in_feature = excluded.role_in_feature,
+           change_guidance = excluded.change_guidance,
+           verification_hint = excluded.verification_hint,
+           blast_radius = excluded.blast_radius,
            line_start = excluded.line_start,
            line_end = excluded.line_end,
            first_seen_scan_run_id = excluded.first_seen_scan_run_id,
@@ -780,6 +933,10 @@ export class FuncTreeRepository {
         planned.symbol,
         planned.kind,
         planned.description,
+        planned.roleInFeature,
+        planned.changeGuidance,
+        planned.verificationHint,
+        planned.blastRadius,
         planned.lineStart,
         planned.lineEnd,
         planned.firstSeenScanRunId,
@@ -926,6 +1083,126 @@ export class FuncTreeRepository {
     return this.runBatch(data.dryRun, data.items, (item) => this.upsertAlignment(data.projectId, { ...item, dryRun: data.dryRun }));
   }
 
+  upsertEvidence(projectId: string, input: CreateEvidenceInput): UpsertResult<EvidenceRow> {
+    const data = CreateEvidenceSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
+    this.getProject(projectId);
+    const targetId = this.resolveEvidenceTarget(projectId, data);
+    const now = nowIso();
+    const signature = evidenceSignature({
+      targetType: data.targetType,
+      targetId,
+      evidenceType: data.evidenceType,
+      path: data.path ?? '',
+      symbol: data.symbol,
+      lineStart: data.lineStart,
+      lineEnd: data.lineEnd,
+      commitSha: data.commitSha ?? ''
+    });
+    const existing = this.findEvidenceForUpsert(projectId, data.id, signature);
+    const id = existing?.id ?? data.id ?? (data.dryRun ? previewId('ev') : newId('ev'));
+    const planned = {
+      id,
+      projectId,
+      targetType: data.targetType,
+      targetId,
+      evidenceType: data.evidenceType,
+      signature,
+      path: data.path ?? '',
+      symbol: data.symbol,
+      lineStart: data.lineStart,
+      lineEnd: data.lineEnd,
+      summary: data.summary,
+      confidence: data.confidence,
+      commitSha: data.commitSha ?? '',
+      verifiedAt: data.verifiedAt,
+      metadata: data.metadata,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      label: this.alignableLabel(data.targetType, targetId)
+    } satisfies EvidenceRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, ['targetType', 'targetId', 'evidenceType', 'path', 'symbol', 'lineStart', 'lineEnd', 'summary', 'confidence', 'commitSha', 'verifiedAt', 'metadata'])
+      : [];
+    if (data.dryRun) {
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true, previewId: existing ? undefined : id };
+    }
+    if (existing && changedFields.length === 0) {
+      return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO evidence
+          (id, project_id, target_type, target_id, evidence_type, signature, path, symbol, line_start, line_end, summary, confidence, commit_sha, verified_at, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           target_type = excluded.target_type,
+           target_id = excluded.target_id,
+           evidence_type = excluded.evidence_type,
+           signature = excluded.signature,
+           path = excluded.path,
+           symbol = excluded.symbol,
+           line_start = excluded.line_start,
+           line_end = excluded.line_end,
+           summary = excluded.summary,
+           confidence = excluded.confidence,
+           commit_sha = excluded.commit_sha,
+           verified_at = excluded.verified_at,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        id,
+        projectId,
+        planned.targetType,
+        planned.targetId,
+        planned.evidenceType,
+        planned.signature,
+        planned.path,
+        planned.symbol,
+        planned.lineStart,
+        planned.lineEnd,
+        planned.summary,
+        planned.confidence,
+        planned.commitSha,
+        planned.verifiedAt,
+        json(planned.metadata),
+        now,
+        now
+      );
+    this.touchProject(projectId);
+    this.recordEvent(projectId, 'http', 'upsert_evidence', { id, targetType: data.targetType, targetId, evidenceType: data.evidenceType });
+    return {
+      operation: existing ? 'updated' : 'created',
+      changedFields,
+      data: this.getEvidence(id),
+      dryRun: false
+    };
+  }
+
+  upsertEvidenceBatch(input: BatchEvidenceInput): BatchUpsertResult<EvidenceRow> {
+    const data = BatchEvidenceSchema.parse(input);
+    this.getProject(data.projectId);
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertEvidence(data.projectId, { ...item, dryRun: data.dryRun }));
+  }
+
+  getEvidence(evidenceId: string): EvidenceRow {
+    const row = this.db.prepare('SELECT * FROM evidence WHERE id = ?').get(evidenceId);
+    if (!row) {
+      throw new NotFoundError(`证据不存在: ${evidenceId}`);
+    }
+    return this.mapEvidenceWithLabel(row);
+  }
+
+  listEvidence(projectId: string): EvidenceRow[] {
+    return this.db
+      .prepare('SELECT * FROM evidence WHERE project_id = ? ORDER BY updated_at DESC')
+      .all(projectId)
+      .map((row) => this.mapEvidenceWithLabel(row));
+  }
+
   listAlignments(projectId: string): AlignmentRow[] {
     return this.db
       .prepare('SELECT * FROM alignments WHERE project_id = ? ORDER BY updated_at DESC')
@@ -945,22 +1222,24 @@ export class FuncTreeRepository {
     const query = QueryContextSchema.parse(input);
     const resolvedMapId = this.resolveQueryMapId(query);
     const resolvedQuery = { ...query, mapId: resolvedMapId ?? query.mapId } satisfies ParsedQueryContext;
-    const types = new Set<QueryContextType>(query.types ?? ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+    const types = new Set<QueryContextType>(query.types ?? ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence']);
     const offset = parseCursor(query.cursor) ?? query.offset;
     const limit = query.limit;
     const projects = query.includeSummaryOnly || !types.has('project') ? [] : this.queryProjects(resolvedQuery, limit, offset);
     const maps = query.includeSummaryOnly || !types.has('map') ? [] : this.queryMaps(resolvedQuery, limit, offset);
-    const features = query.includeSummaryOnly || !types.has('feature') ? [] : this.queryFeatures(resolvedQuery, limit, offset);
+    const features = query.includeSummaryOnly || !types.has('feature') ? [] : this.queryFeatures(resolvedQuery, limit, offset, query.includeDetails);
     const alignments = query.includeSummaryOnly || !types.has('alignment') ? [] : this.queryAlignments(resolvedQuery, limit, offset, query.includeMembers);
     const entryPoints = query.includeSummaryOnly || !types.has('entry_point') ? [] : this.queryEntryPoints(resolvedQuery, limit, offset);
     const codeReferences = query.includeSummaryOnly || !types.has('code_reference') ? [] : this.queryCodeReferences(resolvedQuery, limit, offset);
+    const evidence = query.includeSummaryOnly || !types.has('evidence') ? [] : this.queryEvidence(resolvedQuery, limit, offset);
     const totals: Record<QueryContextType, number> = {
       project: types.has('project') ? this.countProjects(resolvedQuery) : 0,
       map: types.has('map') ? this.countMaps(resolvedQuery) : 0,
       feature: types.has('feature') ? this.countFeatures(resolvedQuery) : 0,
       alignment: types.has('alignment') ? this.countAlignments(resolvedQuery) : 0,
       entry_point: types.has('entry_point') ? this.countEntryPoints(resolvedQuery) : 0,
-      code_reference: types.has('code_reference') ? this.countCodeReferences(resolvedQuery) : 0
+      code_reference: types.has('code_reference') ? this.countCodeReferences(resolvedQuery) : 0,
+      evidence: types.has('evidence') ? this.countEvidence(resolvedQuery) : 0
     };
     const hasMore = Object.values(totals).some((total) => total > offset + limit);
 
@@ -971,6 +1250,7 @@ export class FuncTreeRepository {
       alignments: presentRows('alignment', alignments, query.view, query.includeMetadata),
       entryPoints: presentRows('entry_point', entryPoints, query.view, query.includeMetadata),
       codeReferences: presentRows('code_reference', codeReferences, query.view, query.includeMetadata),
+      evidence: presentRows('evidence', evidence, query.view, query.includeMetadata),
       page: {
         limit,
         offset,
@@ -1148,6 +1428,416 @@ export class FuncTreeRepository {
     };
   }
 
+  programmingContext(input: ProgrammingContextInput): ProgrammingContextResult {
+    const data = ProgrammingContextSchema.parse(input);
+    const project = this.getProject(data.projectId);
+    const mapId = data.mapId || data.mapStableKey ? this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined : undefined;
+    const feature = data.featureId ? this.getFeature(data.featureId, true) : this.resolveFeatureByStableKey(data.projectId, data.featureStableKey ?? '', data.featureVersion, mapId);
+    if (feature.projectId !== data.projectId) {
+      throw new ValidationError('功能不属于当前项目。');
+    }
+    const featureWithDetails = this.getFeature(feature.id, true);
+    const featureMap = this.getMap(feature.mapId);
+    const include = new Set(data.include);
+    const directReferences = include.has('codeReferences') ? this.codeReferencesForFeatures(data.projectId, [feature.id]) : [];
+    const directEntryPoints = include.has('entryPoints') ? this.entryPointsForReferences(data.projectId, directReferences, feature.mapId) : [];
+    const targetKeys = new Set<string>([`feature:${feature.id}`, ...directReferences.map((reference) => `code_reference:${reference.id}`), ...directEntryPoints.map((entryPoint) => `entry_point:${entryPoint.id}`)]);
+    const alignments = include.has('alignments') ? this.findAlignmentsForTargets(data.projectId, targetKeys) : [];
+    const impactedFeatures = data.depth > 0 ? this.impactedFeatures(data.projectId, feature, alignments, data.depth) : [];
+    const impactedReferences = include.has('codeReferences') ? this.codeReferencesForFeatures(data.projectId, impactedFeatures.map((item) => item.id)) : [];
+    const allReferences = uniqueById([...directReferences, ...impactedReferences]);
+    const allEntryPoints = include.has('entryPoints') ? this.entryPointsForReferences(data.projectId, allReferences, feature.mapId) : [];
+    const evidence = include.has('evidence') ? this.evidenceForTargets(data.projectId, new Set([`feature:${feature.id}`, ...allReferences.map((reference) => `code_reference:${reference.id}`), ...alignments.map((alignment) => `alignment:${alignment.id}`)])) : [];
+    const detail = featureWithDetails.details ?? null;
+    const qualityIssues = include.has('quality') ? this.qualityIssuesForFeature(data.projectId, featureWithDetails, detail, allReferences, alignments, evidence, undefined) : [];
+
+    return {
+      project,
+      map: featureMap,
+      feature: featureWithDetails,
+      details: include.has('details') ? detail : null,
+      requiredEntryPoints: allEntryPoints,
+      keyCodeReferences: allReferences,
+      relatedProductCapabilities: impactedFeatures.filter((item) => item.id !== feature.id && this.getMap(item.mapId).axis === 'product'),
+      alignments,
+      impactedFeatures: impactedFeatures.filter((item) => item.id !== feature.id),
+      evidence,
+      risks: include.has('risks') ? detail?.risks ?? [] : [],
+      acceptanceCriteria: include.has('acceptanceCriteria') ? detail?.acceptanceCriteria ?? [] : [],
+      verification: allReferences.map((reference) => reference.verificationHint).filter(isString),
+      qualityIssues
+    };
+  }
+
+  qualityReport(input: QualityReportInput): QualityReportResult {
+    const data = QualityReportSchema.parse(input);
+    this.getProject(data.projectId);
+    const features = this.listFeatures(data.projectId).map((feature) => this.attachFeatureDetails(feature, true));
+    const referencesByFeature = groupBy(this.listCodeReferences(data.projectId).filter((reference) => reference.featureId), (reference) => reference.featureId ?? '');
+    const alignments = this.listAlignments(data.projectId);
+    const alignmentsByFeature = new Map<string, AlignmentRow[]>();
+    for (const alignment of alignments) {
+      for (const member of alignment.members) {
+        if (member.targetType === 'feature') {
+          const list = alignmentsByFeature.get(member.targetId) ?? [];
+          list.push(alignment);
+          alignmentsByFeature.set(member.targetId, list);
+        }
+      }
+    }
+    const evidence = this.listEvidence(data.projectId);
+    const evidenceByTarget = groupBy(evidence, (item) => `${item.targetType}:${item.targetId}`);
+    const issues: QualityIssue[] = [];
+    let featuresWithoutCodeReferences = 0;
+    let featuresWithoutAlignments = 0;
+    let featuresWithoutCodeEvidence = 0;
+    let draftDetailGaps = 0;
+    let inProgressDetailGaps = 0;
+    let blockedDetailGaps = 0;
+    let deprecatedDetailGaps = 0;
+    let mockBoundaryGaps = 0;
+
+    for (const feature of features) {
+      const references = referencesByFeature.get(feature.id) ?? [];
+      const featureAlignments = alignmentsByFeature.get(feature.id) ?? [];
+      const featureEvidence = evidenceByTarget.get(`feature:${feature.id}`) ?? [];
+      const referenceEvidence = references.flatMap((reference) => evidenceByTarget.get(`code_reference:${reference.id}`) ?? []);
+      const featureIssues = this.qualityIssuesForFeature(data.projectId, feature, feature.details ?? null, references, featureAlignments, [...featureEvidence, ...referenceEvidence], undefined);
+      for (const issue of featureIssues) {
+        if (issue.code === 'FEATURE_WITHOUT_CODE_REFERENCE') featuresWithoutCodeReferences += 1;
+        if (issue.code === 'FEATURE_WITHOUT_ALIGNMENT') featuresWithoutAlignments += 1;
+        if (issue.code === 'FEATURE_WITHOUT_CODE_EVIDENCE') featuresWithoutCodeEvidence += 1;
+        if (issue.code === 'DRAFT_DETAIL_GAP') draftDetailGaps += 1;
+        if (issue.code === 'IN_PROGRESS_DETAIL_GAP') inProgressDetailGaps += 1;
+        if (issue.code === 'BLOCKED_DETAIL_GAP') blockedDetailGaps += 1;
+        if (issue.code === 'DEPRECATED_DETAIL_GAP') deprecatedDetailGaps += 1;
+        if (issue.code === 'MOCK_BOUNDARY_GAP') mockBoundaryGaps += 1;
+      }
+      issues.push(...featureIssues);
+    }
+
+    let missingPaths = 0;
+    if (data.repoRoot && data.includePathChecks) {
+      for (const reference of this.listCodeReferences(data.projectId)) {
+        if (!fs.existsSync(path.resolve(data.repoRoot, reference.path))) {
+          missingPaths += 1;
+          issues.push({
+            severity: 'warning',
+            code: 'CODE_REFERENCE_PATH_MISSING',
+            targetType: 'code_reference',
+            targetId: reference.id,
+            message: `代码引用路径不存在: ${reference.path}`,
+            hint: '确认 repoRoot 是否正确，或重新扫描删除/更新失效路径。'
+          });
+        }
+      }
+    }
+
+    const counts = countIssues(issues);
+    return {
+      projectId: data.projectId,
+      summary: {
+        ...counts,
+        featuresWithoutCodeReferences,
+        featuresWithoutAlignments,
+        featuresWithoutCodeEvidence,
+        draftDetailGaps,
+        inProgressDetailGaps,
+        blockedDetailGaps,
+        deprecatedDetailGaps,
+        mockBoundaryGaps,
+        missingPaths
+      },
+      issues
+    };
+  }
+
+  private attachFeatureDetails(feature: FeatureRow, includeDetails: boolean): FeatureRow {
+    return includeDetails ? { ...feature, details: this.findFeatureDetailById(feature.id) ?? undefined } : feature;
+  }
+
+  private findFeatureDetailById(featureId: string): FeatureDetailRow | null {
+    const row = this.db.prepare('SELECT * FROM feature_details WHERE feature_id = ?').get(featureId);
+    return row ? mapFeatureDetail(row) : null;
+  }
+
+  private writeFeatureDetails(details: FeatureDetailRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO feature_details
+          (feature_id, intent, current_behavior, expected_behavior, scope, known_gaps_json, open_questions_json, acceptance_criteria_json, risks_json, blocker, replacement, deprecated_reason, mock_boundary, details_markdown, last_verified_at, last_verified_commit, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(feature_id) DO UPDATE SET
+           intent = excluded.intent,
+           current_behavior = excluded.current_behavior,
+           expected_behavior = excluded.expected_behavior,
+           scope = excluded.scope,
+           known_gaps_json = excluded.known_gaps_json,
+           open_questions_json = excluded.open_questions_json,
+           acceptance_criteria_json = excluded.acceptance_criteria_json,
+           risks_json = excluded.risks_json,
+           blocker = excluded.blocker,
+           replacement = excluded.replacement,
+           deprecated_reason = excluded.deprecated_reason,
+           mock_boundary = excluded.mock_boundary,
+           details_markdown = excluded.details_markdown,
+           last_verified_at = excluded.last_verified_at,
+           last_verified_commit = excluded.last_verified_commit,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        details.featureId,
+        details.intent,
+        details.currentBehavior,
+        details.expectedBehavior,
+        details.scope,
+        jsonArray(details.knownGaps),
+        jsonArray(details.openQuestions),
+        jsonArray(details.acceptanceCriteria),
+        jsonArray(details.risks),
+        details.blocker,
+        details.replacement,
+        details.deprecatedReason,
+        details.mockBoundary,
+        details.detailsMarkdown,
+        details.lastVerifiedAt,
+        details.lastVerifiedCommit,
+        details.updatedAt
+      );
+  }
+
+  private resolveEvidenceTarget(projectId: string, input: { targetType: string; targetId?: string; targetStableKey?: string; mapId?: string; mapStableKey?: string; version?: string }): string {
+    if (input.targetId) {
+      this.assertEvidenceTarget(projectId, input.targetType, input.targetId);
+      return input.targetId;
+    }
+    if (!input.targetStableKey) {
+      throw new ValidationError('证据需要 targetId 或 targetStableKey。');
+    }
+    const resolved = this.resolveStableKeyItem(projectId, {
+      type: input.targetType as ResolveStableKeyType,
+      stableKey: input.targetStableKey,
+      mapId: input.mapId,
+      mapStableKey: input.mapStableKey,
+      version: input.version
+    });
+    if (!resolved) {
+      throw new NotFoundError(`证据目标 stableKey 不存在: ${input.targetType}:${input.targetStableKey}`);
+    }
+    return resolved.id;
+  }
+
+  private assertEvidenceTarget(projectId: string, targetType: string, targetId: string): void {
+    if (targetType === 'alignment') {
+      const alignment = this.getAlignment(targetId);
+      if (alignment.projectId !== projectId) {
+        throw new ValidationError('证据目标不属于当前项目。');
+      }
+      return;
+    }
+    this.assertAlignable(projectId, targetType, targetId);
+  }
+
+  private findEvidenceForUpsert(projectId: string, id: string | undefined, signature: string): EvidenceRow | null {
+    const matches = [
+      id ? this.findEvidenceById(id) : null,
+      signature ? this.findEvidenceBySignature(projectId, signature) : null
+    ].filter((evidence): evidence is EvidenceRow => Boolean(evidence));
+    for (const evidence of matches) {
+      if (evidence.projectId !== projectId) {
+        throw new ValidationError('证据 ID 不属于当前项目。');
+      }
+    }
+    const [first] = matches;
+    if (first && matches.some((evidence) => evidence.id !== first.id)) {
+      throw new ValidationError('证据 id 和签名指向不同对象，请先查询上下文确认。');
+    }
+    return first ?? null;
+  }
+
+  private findEvidenceById(id: string): EvidenceRow | null {
+    const row = this.db.prepare('SELECT * FROM evidence WHERE id = ?').get(id);
+    return row ? this.mapEvidenceWithLabel(row) : null;
+  }
+
+  private findEvidenceBySignature(projectId: string, signature: string): EvidenceRow | null {
+    const row = this.db.prepare('SELECT * FROM evidence WHERE project_id = ? AND signature = ?').get(projectId, signature);
+    return row ? this.mapEvidenceWithLabel(row) : null;
+  }
+
+  private mapEvidenceWithLabel(row: unknown): EvidenceRow {
+    const evidence = mapEvidence(row);
+    return { ...evidence, label: this.evidenceTargetLabel(evidence.targetType, evidence.targetId) };
+  }
+
+  private evidenceTargetLabel(targetType: string, targetId: string): string {
+    if (targetType === 'alignment') {
+      try {
+        return this.getAlignment(targetId).name;
+      } catch {
+        return targetId;
+      }
+    }
+    return this.alignableLabel(targetType, targetId);
+  }
+
+  private codeReferencesForFeatures(projectId: string, featureIds: string[]): CodeReferenceRow[] {
+    if (featureIds.length === 0) {
+      return [];
+    }
+    const placeholders = featureIds.map(() => '?').join(', ');
+    return this.db
+      .prepare(`SELECT * FROM code_references WHERE project_id = ? AND feature_id IN (${placeholders}) ORDER BY path, symbol, kind`)
+      .all(projectId, ...featureIds)
+      .map(mapCodeReference);
+  }
+
+  private entryPointsForReferences(projectId: string, references: CodeReferenceRow[], fallbackMapId: string): EntryPointRow[] {
+    const entryPointIds = unique(references.map((reference) => reference.entryPointId).filter(isString));
+    const entriesById = entryPointIds.map((entryPointId) => this.findEntryPointById(entryPointId)).filter(isNonNull);
+    const mapEntries = this.db
+      .prepare('SELECT * FROM entry_points WHERE project_id = ? AND map_id = ? ORDER BY kind, path, name')
+      .all(projectId, fallbackMapId)
+      .map(mapEntryPoint);
+    return uniqueById([...entriesById, ...mapEntries]);
+  }
+
+  private impactedFeatures(projectId: string, feature: FeatureRow, alignments: AlignmentRow[], depth: number): FeatureRow[] {
+    const result = new Map<string, FeatureRow>([[feature.id, feature]]);
+    const visit = (item: FeatureRow, remaining: number) => {
+      if (remaining <= 0) return;
+      if (item.parentFeatureId) {
+        const parent = this.findFeatureById(item.parentFeatureId);
+        if (parent && !result.has(parent.id)) {
+          result.set(parent.id, parent);
+          visit(parent, remaining - 1);
+        }
+      }
+      const children = this.db.prepare('SELECT * FROM features WHERE project_id = ? AND parent_feature_id = ? ORDER BY sort_order, name').all(projectId, item.id).map(mapFeature);
+      for (const child of children) {
+        if (!result.has(child.id)) {
+          result.set(child.id, child);
+          visit(child, remaining - 1);
+        }
+      }
+    };
+    visit(feature, depth);
+    for (const alignment of alignments) {
+      for (const member of alignment.members) {
+        if (member.targetType === 'feature') {
+          const aligned = this.findFeatureById(member.targetId);
+          if (aligned) result.set(aligned.id, aligned);
+        }
+      }
+    }
+    return [...result.values()];
+  }
+
+  private evidenceForTargets(projectId: string, targets: Set<string>): EvidenceRow[] {
+    if (targets.size === 0) return [];
+    return this.listEvidence(projectId).filter((item) => targets.has(`${item.targetType}:${item.targetId}`));
+  }
+
+  private qualityIssuesForFeature(
+    projectId: string,
+    feature: FeatureRow,
+    details: FeatureDetailRow | null,
+    references: CodeReferenceRow[],
+    alignments: AlignmentRow[],
+    evidence: EvidenceRow[],
+    repoRoot: string | undefined
+  ): QualityIssue[] {
+    const issues: QualityIssue[] = [];
+    const target = { targetType: 'feature', targetId: feature.id };
+    if (references.length === 0) {
+      issues.push({
+        severity: feature.status === 'released' || feature.status === 'completed' ? 'error' : 'warning',
+        code: 'FEATURE_WITHOUT_CODE_REFERENCE',
+        ...target,
+        message: `功能缺少代码引用: ${feature.name}`,
+        hint: '为已实现功能补充 code reference；如果只是规划或文档，请补充 planned/doc_claim evidence。'
+      });
+    }
+    if (alignments.length === 0) {
+      issues.push({
+        severity: 'info',
+        code: 'FEATURE_WITHOUT_ALIGNMENT',
+        ...target,
+        message: `功能缺少对齐关系: ${feature.name}`,
+        hint: '补充产品、前端、后端、SDK、测试或运维之间的 alignment，便于影响分析。'
+      });
+    }
+    if (!evidence.some((item) => item.evidenceType === 'code_fact')) {
+      issues.push({
+        severity: feature.status === 'released' || feature.status === 'completed' ? 'error' : 'warning',
+        code: 'FEATURE_WITHOUT_CODE_EVIDENCE',
+        ...target,
+        message: `功能缺少代码事实证据: ${feature.name}`,
+        hint: '为真实能力补充 code_fact evidence；mock、文档或计划不要当作代码事实。'
+      });
+    }
+    if (feature.status === 'draft' && (!details?.intent || !details.scope || details.knownGaps.length === 0)) {
+      issues.push({
+        severity: 'warning',
+        code: 'DRAFT_DETAIL_GAP',
+        ...target,
+        message: `草稿功能缺少 intent/scope/knownGaps: ${feature.name}`,
+        hint: '草稿功能至少说明目标、范围和已知缺口。'
+      });
+    }
+    if (feature.status === 'in_progress' && (!details?.currentBehavior || !details.expectedBehavior || details.acceptanceCriteria.length === 0)) {
+      issues.push({
+        severity: 'warning',
+        code: 'IN_PROGRESS_DETAIL_GAP',
+        ...target,
+        message: `进行中功能缺少 currentBehavior/expectedBehavior/acceptanceCriteria: ${feature.name}`,
+        hint: '进行中功能需要说明当前做到哪里、目标行为和验收条件。'
+      });
+    }
+    if (feature.status === 'blocked' && (!details?.blocker || details.openQuestions.length === 0)) {
+      issues.push({
+        severity: 'warning',
+        code: 'BLOCKED_DETAIL_GAP',
+        ...target,
+        message: `阻塞功能缺少 blocker/openQuestions: ${feature.name}`,
+        hint: '阻塞功能需要说明阻塞原因和未确认问题。'
+      });
+    }
+    if (feature.status === 'deprecated' && (!details?.replacement || !details.deprecatedReason)) {
+      issues.push({
+        severity: 'warning',
+        code: 'DEPRECATED_DETAIL_GAP',
+        ...target,
+        message: `废弃功能缺少 replacement/deprecatedReason: ${feature.name}`,
+        hint: '废弃功能需要说明替代方案和废弃原因。'
+      });
+    }
+    if ((feature.status === 'mock_only' || evidence.some((item) => item.evidenceType === 'mock_only')) && !details?.mockBoundary) {
+      issues.push({
+        severity: 'warning',
+        code: 'MOCK_BOUNDARY_GAP',
+        ...target,
+        message: `Mock 功能缺少边界说明: ${feature.name}`,
+        hint: '明确 mock/原型不能当作真实能力的边界。'
+      });
+    }
+    if (repoRoot) {
+      for (const reference of references) {
+        if (!fs.existsSync(path.resolve(repoRoot, reference.path))) {
+          issues.push({
+            severity: 'warning',
+            code: 'CODE_REFERENCE_PATH_MISSING',
+            targetType: 'code_reference',
+            targetId: reference.id,
+            message: `代码引用路径不存在: ${reference.path}`,
+            hint: '确认 repoRoot 是否正确，或重新扫描删除/更新失效路径。'
+          });
+        }
+      }
+    }
+    return issues;
+  }
+
   private runBatch<T, I>(dryRun: boolean, items: I[], handler: (item: I) => UpsertResult<T>): BatchUpsertResult<T> {
     const results: Array<UpsertResult<T> & { index: number }> = [];
     const errors: BatchUpsertResult<T>['errors'] = [];
@@ -1167,7 +1857,7 @@ export class FuncTreeRepository {
 
     if (dryRun) {
       execute();
-      return { success: errors.length === 0, dryRun, rolledBack: false, results, errors };
+      return { success: errors.length === 0, dryRun, rolledBack: false, summary: batchSummary(results, errors), results, errors };
     }
 
     try {
@@ -1182,6 +1872,7 @@ export class FuncTreeRepository {
       success: errors.length === 0,
       dryRun,
       rolledBack: errors.length > 0,
+      summary: batchSummary(results, errors),
       results,
       errors
     };
@@ -1227,7 +1918,7 @@ export class FuncTreeRepository {
     return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM maps m WHERE ${where.join(' AND ')}`).get(...args));
   }
 
-  private queryFeatures(query: ParsedQueryContext, limit: number, offset: number): FeatureRow[] {
+  private queryFeatures(query: ParsedQueryContext, limit: number, offset: number, includeDetails = false): FeatureRow[] {
     const { where, args } = this.featureQueryParts(query);
     return this.db
       .prepare(
@@ -1238,7 +1929,7 @@ export class FuncTreeRepository {
          LIMIT ? OFFSET ?`
       )
       .all(...args, limit, offset)
-      .map(mapFeature);
+      .map((row) => this.attachFeatureDetails(mapFeature(row), includeDetails));
   }
 
   private countFeatures(query: ParsedQueryContext): number {
@@ -1270,6 +1961,19 @@ export class FuncTreeRepository {
   private countCodeReferences(query: ParsedQueryContext): number {
     const { where, args } = this.codeReferenceQueryParts(query);
     return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM code_references cr WHERE ${where.join(' AND ')}`).get(...args));
+  }
+
+  private queryEvidence(query: ParsedQueryContext, limit: number, offset: number): EvidenceRow[] {
+    const { where, args } = this.evidenceQueryParts(query);
+    return this.db
+      .prepare(`SELECT e.* FROM evidence e WHERE ${where.join(' AND ')} ORDER BY e.updated_at DESC LIMIT ? OFFSET ?`)
+      .all(...args, limit, offset)
+      .map((row) => this.mapEvidenceWithLabel(row));
+  }
+
+  private countEvidence(query: ParsedQueryContext): number {
+    const { where, args } = this.evidenceQueryParts(query);
+    return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM evidence e WHERE ${where.join(' AND ')}`).get(...args));
   }
 
   private queryAlignments(query: ParsedQueryContext, limit: number, offset: number, includeMembers = true): AlignmentRow[] {
@@ -1512,6 +2216,88 @@ export class FuncTreeRepository {
     return { where, args };
   }
 
+  private evidenceQueryParts(query: ParsedQueryContext): QueryParts {
+    const where = ['1=1'];
+    const args: SQLInputValue[] = [];
+    if (query.projectId) {
+      where.push('e.project_id = ?');
+      args.push(query.projectId);
+    }
+    if (query.mapId) {
+      where.push(
+        `(
+          (e.target_type = 'map' AND e.target_id = ?)
+          OR (e.target_type = 'feature' AND e.target_id IN (SELECT id FROM features WHERE map_id = ?))
+          OR (e.target_type = 'entry_point' AND e.target_id IN (SELECT id FROM entry_points WHERE map_id = ?))
+          OR (e.target_type = 'code_reference' AND e.target_id IN (SELECT id FROM code_references WHERE map_id = ?))
+          OR (e.target_type = 'alignment' AND e.target_id IN (
+            SELECT a.id
+            FROM alignments a
+            JOIN alignment_members am ON am.alignment_id = a.id
+            LEFT JOIN features f ON am.target_type = 'feature' AND f.id = am.target_id
+            LEFT JOIN entry_points ep ON am.target_type = 'entry_point' AND ep.id = am.target_id
+            LEFT JOIN code_references cr ON am.target_type = 'code_reference' AND cr.id = am.target_id
+            WHERE (am.target_type = 'map' AND am.target_id = ?)
+              OR (am.target_type = 'feature' AND f.map_id = ?)
+              OR (am.target_type = 'entry_point' AND ep.map_id = ?)
+              OR (am.target_type = 'code_reference' AND cr.map_id = ?)
+          ))
+        )`
+      );
+      args.push(query.mapId, query.mapId, query.mapId, query.mapId, query.mapId, query.mapId, query.mapId, query.mapId);
+    }
+    if (query.stableKey) {
+      where.push(
+        `(
+          (e.target_type = 'map' AND e.target_id IN (SELECT id FROM maps WHERE stable_key = ?))
+          OR (e.target_type = 'feature' AND e.target_id IN (SELECT id FROM features WHERE stable_key = ?))
+          OR (e.target_type = 'entry_point' AND e.target_id IN (SELECT id FROM entry_points WHERE stable_key = ?))
+          OR (e.target_type = 'code_reference' AND e.target_id IN (SELECT id FROM code_references WHERE stable_key = ?))
+          OR (e.target_type = 'alignment' AND e.target_id IN (SELECT id FROM alignments WHERE stable_key = ?))
+        )`
+      );
+      args.push(query.stableKey, query.stableKey, query.stableKey, query.stableKey, query.stableKey);
+    }
+    if (query.alignmentId) {
+      where.push("((e.target_type = 'alignment' AND e.target_id = ?) OR EXISTS (SELECT 1 FROM alignment_members am WHERE am.alignment_id = ? AND e.target_type = am.target_type AND e.target_id = am.target_id))");
+      args.push(query.alignmentId, query.alignmentId);
+    }
+    if (query.parentFeatureId === null) {
+      where.push(
+        `(
+          (e.target_type = 'feature' AND e.target_id IN (SELECT id FROM features WHERE parent_feature_id IS NULL))
+          OR (e.target_type = 'code_reference' AND e.target_id IN (
+            SELECT cr.id FROM code_references cr JOIN features f ON f.id = cr.feature_id WHERE f.parent_feature_id IS NULL
+          ))
+        )`
+      );
+    } else if (query.parentFeatureId) {
+      where.push(
+        `(
+          (e.target_type = 'feature' AND e.target_id IN (SELECT id FROM features WHERE parent_feature_id = ?))
+          OR (e.target_type = 'code_reference' AND e.target_id IN (
+            SELECT cr.id FROM code_references cr JOIN features f ON f.id = cr.feature_id WHERE f.parent_feature_id = ?
+          ))
+        )`
+      );
+      args.push(query.parentFeatureId, query.parentFeatureId);
+    }
+    if (query.entryPointId) {
+      where.push("((e.target_type = 'entry_point' AND e.target_id = ?) OR (e.target_type = 'code_reference' AND e.target_id IN (SELECT id FROM code_references WHERE entry_point_id = ?)))");
+      args.push(query.entryPointId, query.entryPointId);
+    }
+    if (query.codeReferenceId) {
+      where.push("e.target_type = 'code_reference' AND e.target_id = ?");
+      args.push(query.codeReferenceId);
+    }
+    if (query.path) {
+      where.push('LOWER(e.path) LIKE ? ESCAPE \'\\\'');
+      args.push(pathPattern(query.path, query.pathMode));
+    }
+    appendKeywordClause(where, args, 'e', ['id', 'target_type', 'target_id', 'evidence_type', 'path', 'symbol', 'summary', 'commit_sha'], query.keyword);
+    return { where, args };
+  }
+
   private alignmentQueryParts(query: ParsedQueryContext): QueryParts {
     const where = ['1=1'];
     const args: SQLInputValue[] = [];
@@ -1620,6 +2406,7 @@ export class FuncTreeRepository {
       mapCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM maps ${projectWhere}`).get(...projectArgs)),
       featureCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM features ${projectWhere}`).get(...projectArgs)),
       alignmentCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM alignments ${projectWhere}`).get(...projectArgs)),
+      evidenceCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM evidence ${projectWhere}`).get(...projectArgs)),
       entryPointCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM entry_points ${projectWhere}`).get(...projectArgs)),
       codeReferenceCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM code_references ${projectWhere}`).get(...projectArgs)),
       scanRunCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM scan_runs ${projectWhere}`).get(...projectArgs)),
@@ -1643,13 +2430,15 @@ export class FuncTreeRepository {
                SELECT updated_at FROM projects WHERE id = ?
                UNION ALL SELECT updated_at FROM maps WHERE project_id = ?
                UNION ALL SELECT updated_at FROM features WHERE project_id = ?
+               UNION ALL SELECT fd.updated_at FROM feature_details fd JOIN features f ON f.id = fd.feature_id WHERE f.project_id = ?
                UNION ALL SELECT updated_at FROM entry_points WHERE project_id = ?
                UNION ALL SELECT updated_at FROM code_references WHERE project_id = ?
+               UNION ALL SELECT updated_at FROM evidence WHERE project_id = ?
                UNION ALL SELECT updated_at FROM alignments WHERE project_id = ?
                UNION ALL SELECT updated_at FROM scan_runs WHERE project_id = ?
              )`
           )
-          .get(projectId, projectId, projectId, projectId, projectId, projectId, projectId) as { updated_at: string | null })
+          .get(projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId) as { updated_at: string | null })
       : (this.db
           .prepare(
             `SELECT MAX(updated_at) AS updated_at
@@ -1657,8 +2446,10 @@ export class FuncTreeRepository {
                SELECT updated_at FROM projects
                UNION ALL SELECT updated_at FROM maps
                UNION ALL SELECT updated_at FROM features
+               UNION ALL SELECT updated_at FROM feature_details
                UNION ALL SELECT updated_at FROM entry_points
                UNION ALL SELECT updated_at FROM code_references
+               UNION ALL SELECT updated_at FROM evidence
                UNION ALL SELECT updated_at FROM alignments
                UNION ALL SELECT updated_at FROM scan_runs
              )`
@@ -2338,6 +3129,29 @@ function mapFeature(row: unknown): FeatureRow {
   };
 }
 
+function mapFeatureDetail(row: unknown): FeatureDetailRow {
+  const value = row as Record<string, unknown>;
+  return {
+    featureId: String(value.feature_id),
+    intent: String(value.intent ?? ''),
+    currentBehavior: String(value.current_behavior ?? ''),
+    expectedBehavior: String(value.expected_behavior ?? ''),
+    scope: String(value.scope ?? ''),
+    knownGaps: parseStringArray(value.known_gaps_json),
+    openQuestions: parseStringArray(value.open_questions_json),
+    acceptanceCriteria: parseStringArray(value.acceptance_criteria_json),
+    risks: parseStringArray(value.risks_json),
+    blocker: String(value.blocker ?? ''),
+    replacement: String(value.replacement ?? ''),
+    deprecatedReason: String(value.deprecated_reason ?? ''),
+    mockBoundary: String(value.mock_boundary ?? ''),
+    detailsMarkdown: String(value.details_markdown ?? ''),
+    lastVerifiedAt: String(value.last_verified_at ?? ''),
+    lastVerifiedCommit: String(value.last_verified_commit ?? ''),
+    updatedAt: String(value.updated_at)
+  };
+}
+
 function mapEntryPoint(row: unknown): EntryPointRow {
   const value = row as Record<string, unknown>;
   return {
@@ -2373,12 +3187,39 @@ function mapCodeReference(row: unknown): CodeReferenceRow {
     symbol: String(value.symbol ?? ''),
     kind: String(value.kind),
     description: String(value.description ?? ''),
+    roleInFeature: String(value.role_in_feature ?? ''),
+    changeGuidance: String(value.change_guidance ?? ''),
+    verificationHint: String(value.verification_hint ?? ''),
+    blastRadius: String(value.blast_radius ?? ''),
     lineStart: nullableNumber(value.line_start),
     lineEnd: nullableNumber(value.line_end),
     firstSeenScanRunId: value.first_seen_scan_run_id ? String(value.first_seen_scan_run_id) : null,
     lastSeenScanRunId: value.last_seen_scan_run_id ? String(value.last_seen_scan_run_id) : null,
     lastSeenCommitSha: String(value.last_seen_commit_sha ?? ''),
     lastScannedAt: value.last_scanned_at ? String(value.last_scanned_at) : null,
+    metadata: parseJson(value.metadata_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at)
+  };
+}
+
+function mapEvidence(row: unknown): EvidenceRow {
+  const value = row as Record<string, unknown>;
+  return {
+    id: String(value.id),
+    projectId: String(value.project_id),
+    targetType: String(value.target_type),
+    targetId: String(value.target_id),
+    evidenceType: String(value.evidence_type),
+    signature: String(value.signature),
+    path: String(value.path ?? ''),
+    symbol: String(value.symbol ?? ''),
+    lineStart: nullableNumber(value.line_start),
+    lineEnd: nullableNumber(value.line_end),
+    summary: String(value.summary ?? ''),
+    confidence: Number(value.confidence ?? 1),
+    commitSha: String(value.commit_sha ?? ''),
+    verifiedAt: String(value.verified_at ?? ''),
     metadata: parseJson(value.metadata_json),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at)
@@ -2523,6 +3364,42 @@ function previewId(prefix: string): string {
   return `preview_${newId(prefix)}`;
 }
 
+function normalizeFeatureDetailInput(featureId: string, input: unknown, existing: FeatureDetailRow | null, updatedAt: string): FeatureDetailRow {
+  const details = FeatureDetailSchema.parse(input);
+  return {
+    featureId,
+    intent: details.intent,
+    currentBehavior: details.currentBehavior,
+    expectedBehavior: details.expectedBehavior,
+    scope: details.scope,
+    knownGaps: details.knownGaps,
+    openQuestions: details.openQuestions,
+    acceptanceCriteria: details.acceptanceCriteria,
+    risks: details.risks,
+    blocker: details.blocker,
+    replacement: details.replacement,
+    deprecatedReason: details.deprecatedReason,
+    mockBoundary: details.mockBoundary,
+    detailsMarkdown: details.detailsMarkdown,
+    lastVerifiedAt: details.lastVerifiedAt,
+    lastVerifiedCommit: details.lastVerifiedCommit ?? existing?.lastVerifiedCommit ?? '',
+    updatedAt
+  };
+}
+
+function evidenceSignature(input: {
+  targetType: string;
+  targetId: string;
+  evidenceType: string;
+  path: string;
+  symbol: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+  commitSha: string;
+}): string {
+  return [input.targetType, input.targetId, input.evidenceType, input.path, input.symbol, input.lineStart ?? '', input.lineEnd ?? '', input.commitSha].join('|');
+}
+
 function presentRows<T extends Record<string, unknown>>(type: QueryContextType, rows: T[], view: string, includeMetadata: boolean): Array<T | QueryLiteRow> {
   if (view === 'lite') {
     return rows.map((row) => toLiteRow(type, row));
@@ -2611,6 +3488,39 @@ function normalizeJson(value: unknown): unknown {
 
 function unique(values: string[]): string[] {
   return Array.from(new Set(values));
+}
+
+function uniqueById<T extends { id: string }>(values: T[]): T[] {
+  return Array.from(new Map(values.map((value) => [value.id, value])).values());
+}
+
+function groupBy<T>(values: T[], keyFor: (value: T) => string): Map<string, T[]> {
+  const result = new Map<string, T[]>();
+  for (const value of values) {
+    const key = keyFor(value);
+    const existing = result.get(key) ?? [];
+    existing.push(value);
+    result.set(key, existing);
+  }
+  return result;
+}
+
+function countIssues(issues: QualityIssue[]): { errors: number; warnings: number; info: number } {
+  return {
+    errors: issues.filter((issue) => issue.severity === 'error').length,
+    warnings: issues.filter((issue) => issue.severity === 'warning').length,
+    info: issues.filter((issue) => issue.severity === 'info').length
+  };
+}
+
+function batchSummary<T>(results: Array<UpsertResult<T>>, errors: unknown[]): BatchUpsertResult<T>['summary'] {
+  return {
+    created: results.filter((result) => result.operation === 'created').length,
+    updated: results.filter((result) => result.operation === 'updated').length,
+    unchanged: results.filter((result) => result.operation === 'unchanged').length,
+    dryRun: results.filter((result) => result.operation === 'dry_run').length,
+    errors: errors.length
+  };
 }
 
 function errorInfo(error: unknown): { code: string; message: string; hint: string } {

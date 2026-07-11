@@ -13,7 +13,7 @@ const mapAxes = ['capability', 'product', 'web', 'backend', 'sdk', 'ops', 'data'
 const mapScopes = ['capability', 'implementation', 'contract', 'operation', 'validation', 'documentation', 'data', 'other'] as const;
 const mapKinds = ['domain', 'app', 'service', 'package', 'module', 'api', 'database', 'deployment', 'test_suite', 'document', 'other'] as const;
 const mapStatuses = ['normal', 'draft', 'frozen', 'archived', 'deprecated'] as const;
-const featureStatuses = ['draft', 'in_progress', 'reviewing', 'completed', 'released', 'archived', 'deprecated', 'blocked'] as const;
+const featureStatuses = ['draft', 'in_progress', 'reviewing', 'completed', 'released', 'archived', 'deprecated', 'blocked', 'mock_only'] as const;
 const featureKinds = ['capability', 'module', 'page', 'api', 'component', 'process', 'rule', 'test', 'doc', 'data', 'operation', 'other'] as const;
 const entryPointKinds = ['app_root', 'router', 'server_bootstrap', 'http_api_root', 'cli', 'build', 'config', 'schema', 'deployment', 'test', 'other'] as const;
 const codeReferenceKinds = ['file', 'class', 'function', 'component', 'api', 'route', 'table', 'migration', 'config', 'test', 'document', 'other'] as const;
@@ -28,15 +28,29 @@ const alignmentRelations = [
   'conflicts_with',
   'covers',
   'decomposes_to',
-  'related_to'
+  'related_to',
+  'frontend_implements',
+  'backend_implements',
+  'sdk_exposes',
+  'ops_deploys',
+  'stores_data_for',
+  'guards_permission_for',
+  'mock_represents',
+  'deprecated_by',
+  'requires',
+  'breaks_if_changed'
 ] as const;
 const alignmentStatuses = ['proposed', 'confirmed', 'rejected', 'stale'] as const;
 const alignmentRoles = ['source', 'target', 'peer', 'evidence'] as const;
-const queryContextTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
+const evidenceTypes = ['code_fact', 'doc_claim', 'inferred', 'planned', 'mock_only', 'deprecated'] as const;
+const evidenceTargetTypes = ['map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
+const codeReferenceRoles = ['entry', 'core_logic', 'permission_check', 'storage', 'rendering', 'configuration', 'test', 'contract', 'adapter', 'other'] as const;
+const queryContextTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence'] as const;
 const queryContextViews = ['full', 'lite'] as const;
 const pathMatchModes = ['contains', 'exact', 'prefix'] as const;
 const resolveStableKeyTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
 const scanRunStatuses = ['completed', 'failed', 'cancelled'] as const;
+const programmingContextIncludes = ['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality'] as const;
 
 type Config = {
   serverUrl: string;
@@ -46,6 +60,24 @@ type Config = {
 const metadataSchema = z.record(z.string(), z.unknown()).optional().describe('Optional JSON metadata forwarded to FuncTree.');
 const tagsSchema = z.array(z.string().min(1).max(60)).max(40).optional().describe('Optional tags for secondary grouping, not primary frontend/backend classification.');
 const dryRunSchema = z.boolean().optional().describe('When true, return the planned operation and changed fields without writing data.');
+const detailListSchema = z.array(z.string().min(1).max(800)).max(80).optional();
+const featureDetailsSchema = z.object({
+  intent: z.string().optional().describe('Problem or user/developer need this feature is intended to solve.'),
+  currentBehavior: z.string().optional().describe('What the current running code actually does.'),
+  expectedBehavior: z.string().optional().describe('Target behavior or desired end state.'),
+  scope: z.string().optional().describe('What is in scope and out of scope for this feature.'),
+  knownGaps: detailListSchema.describe('Known missing pieces or incomplete parts.'),
+  openQuestions: detailListSchema.describe('Unresolved questions or decisions.'),
+  acceptanceCriteria: detailListSchema.describe('Checks that prove the feature is acceptable.'),
+  risks: detailListSchema.describe('Risks, edge cases, or boundary conditions.'),
+  blocker: z.string().optional().describe('Blocking issue when status is blocked.'),
+  replacement: z.string().optional().describe('Replacement feature or path when deprecated.'),
+  deprecatedReason: z.string().optional().describe('Reason this feature is deprecated.'),
+  mockBoundary: z.string().optional().describe('Boundary that explains why mock/prototype behavior is not real capability.'),
+  detailsMarkdown: z.string().optional().describe('Long-form feature details in Markdown.'),
+  lastVerifiedAt: z.string().optional().describe('Last verification timestamp or date.'),
+  lastVerifiedCommit: z.string().optional().describe('Last verified Git commit SHA.')
+});
 const alignmentMemberSchema = z.object({
   targetType: z.enum(alignableTypes).describe('Type of aligned object.'),
   targetId: z.string().optional().describe('ID of the aligned object. Optional when stableKey is provided.'),
@@ -85,6 +117,7 @@ const featureItemShape = {
   description: z.string().optional().describe('Human-readable feature summary.'),
   sortOrder: z.number().int().min(0).max(100000).optional().describe('Optional sibling ordering value.'),
   tags: tagsSchema,
+  details: featureDetailsSchema.optional().describe('Structured feature details. Use this especially for draft, in_progress, blocked, deprecated, or mock_only features.'),
   metadata: metadataSchema
 };
 
@@ -116,6 +149,10 @@ const codeReferenceItemShape = {
   symbol: z.string().optional().describe('Optional symbol, route, table, component, function, class, or section name.'),
   kind: z.enum(codeReferenceKinds).describe('Reference kind.'),
   description: z.string().optional().describe('Human-readable reason this code reference matters.'),
+  roleInFeature: z.enum(codeReferenceRoles).optional().describe('Why this reference matters to the feature, such as entry, core_logic, permission_check, storage, rendering, configuration, test, contract, adapter, or other.'),
+  changeGuidance: z.string().optional().describe('Guidance for future agents when changing this file or symbol.'),
+  verificationHint: z.string().optional().describe('How to verify changes touching this reference.'),
+  blastRadius: z.string().optional().describe('Likely impact scope if this reference changes.'),
   lineStart: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based start line.'),
   lineEnd: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based end line.'),
   scanRunId: z.string().optional().describe('Optional scan run ID marking where this code reference was discovered.'),
@@ -145,6 +182,26 @@ const alignmentItemShape = {
   metadata: metadataSchema
 };
 
+const evidenceItemShape = {
+  id: z.string().optional().describe('Optional concrete evidence ID. If omitted, FuncTree generates one.'),
+  targetType: z.enum(evidenceTargetTypes).describe('Object type this evidence supports: map, feature, alignment, entry_point, or code_reference.'),
+  targetId: z.string().optional().describe('Concrete target ID. Optional when targetStableKey is provided.'),
+  targetStableKey: z.string().optional().describe('Stable key of the target object. For features, include mapStableKey/mapId and optionally version.'),
+  mapId: z.string().optional().describe('Optional map ID used to disambiguate feature targets.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey used to disambiguate feature targets.'),
+  version: z.string().optional().describe('Optional feature version used with feature targetStableKey.'),
+  evidenceType: z.enum(evidenceTypes).describe('Evidence type. Use code_fact for running-code facts, doc_claim for docs, inferred for analysis, planned for future work, mock_only for prototypes, deprecated for legacy behavior.'),
+  path: z.string().optional().describe('Optional source path for this evidence.'),
+  symbol: z.string().optional().describe('Optional source symbol, route, section, test, or API name.'),
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based source line start.'),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based source line end.'),
+  summary: z.string().optional().describe('Short evidence summary.'),
+  confidence: z.number().min(0).max(1).optional().describe('Confidence from 0 to 1. Defaults to 1.'),
+  commitSha: z.string().optional().describe('Git commit SHA where this evidence was verified.'),
+  verifiedAt: z.string().optional().describe('Verification timestamp or date.'),
+  metadata: metadataSchema
+};
+
 const config = readConfig(process.argv.slice(2), process.env);
 
 const server = new McpServer(
@@ -160,10 +217,14 @@ const server = new McpServer(
       'Use map axis/scope/kind for primary classification. Tags are only secondary labels.',
       'Entry points tell future agents where project analysis should start. A project can have multiple entry points across frontend, backend, CLI, config, schema, deployment, and test surfaces.',
       'Code references connect features and maps to concrete files, symbols, routes, tables, migrations, configs, tests, or documents.',
+      'Use feature details for unfinished or uncertain work: intent, currentBehavior, expectedBehavior, scope, knownGaps, openQuestions, acceptanceCriteria, risks, and detailsMarkdown.',
+      'Use evidence to separate running-code facts from documentation claims, inference, plans, mock-only behavior, and deprecated behavior. Never treat mock_only or planned evidence as real backend capability.',
+      'Use functree_get_programming_context when preparing to change a feature; it returns prioritized entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, and quality issues.',
+      'Use functree_quality_report after syncs to find missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress details, mock boundaries, and stale paths.',
       'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not store business data.',
       'Use functree_query_context before writing when IDs, stableKeys, existing maps, features, entry points, code references, or alignments are uncertain.',
       'Use functree_resolve_stable_keys when you need a stableKey -> id mapping for many objects before creating alignments.',
-      'Use functree_project_summary after large syncs to confirm counts, latest scan, conflicts, and orphan references.',
+      'Use functree_project_summary after large syncs to confirm counts, latest scan, conflicts, evidence count, and orphan references.',
       'Use functree_query_path_context before updating code references for a file path to avoid duplicate near-identical references.',
       'functree_query_context is read-only and supports keyword, types, view: "lite", includeSummaryOnly, includeMembers, stableKey, mapId/mapStableKey, alignmentId, parentFeatureId, entryPointId, codeReferenceId, path/pathMode, offset, and cursor filters.',
       'Write tools return operation, changedFields, data, dryRun, and sometimes previewId. dryRun-created IDs are prefixed with preview_ and must not be reused as real IDs.',
@@ -283,6 +344,27 @@ server.registerTool(
     }
   },
   async (args) => textResult(await callHttpTool(config, 'functree_upsert_code_reference', args))
+);
+
+server.registerTool(
+  'functree_upsert_evidence',
+  {
+    title: 'Create or update evidence',
+    description:
+      'Create or update first-class evidence for a feature, map, alignment, entry point, or code reference. Use evidenceType to separate code_fact, doc_claim, inferred, planned, mock_only, and deprecated facts.',
+    inputSchema: {
+      ...evidenceItemShape,
+      projectId: z.string().describe('ID of the project that owns this evidence.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_evidence', args))
 );
 
 server.registerTool(
@@ -414,6 +496,27 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_upsert_evidence_batch',
+  {
+    title: 'Batch upsert evidence',
+    description:
+      'Batch upsert evidence under one project. Supports dryRun, per-item operation, changedFields, and rollback on write failure.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all evidence in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(evidenceItemShape)).min(1).max(500).describe('Evidence items to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_evidence_batch', args))
+);
+
+server.registerTool(
   'functree_query_context',
   {
     title: 'Query FuncTree context',
@@ -425,11 +528,12 @@ server.registerTool(
         .string()
         .optional()
         .describe('Optional keyword matched against names, descriptions, versions, stableKeys, IDs, paths, and symbols. Supports dot and hyphen fragments.'),
-      types: z.array(z.enum(queryContextTypes)).min(1).max(6).optional().describe('Object types to return, for example ["feature"] or ["entry_point"].'),
+      types: z.array(z.enum(queryContextTypes)).min(1).max(7).optional().describe('Object types to return, for example ["feature"], ["evidence"], or ["entry_point"].'),
       view: z.enum(queryContextViews).optional().describe('Use "lite" to return compact id/stableKey/name/type/mapId/path rows instead of full objects.'),
       includeSummaryOnly: z.boolean().optional().describe('When true, return only page totals and project summary without row arrays.'),
       includeMembers: z.boolean().optional().describe('When false, alignment rows omit members to reduce response size. Defaults to true.'),
       includeMetadata: z.boolean().optional().describe('When false in full view, omit metadata fields. Defaults to true.'),
+      includeDetails: z.boolean().optional().describe('When true, feature rows include structured details. Defaults to false to keep broad queries light.'),
       mapId: z.string().optional().describe('Filter maps, features, entry points, code references, or related alignments by map ID.'),
       mapStableKey: z.string().optional().describe('Filter by map stableKey. Requires projectId.'),
       stableKey: z.string().optional().describe('Exact stableKey filter for maps, features, entry points, code references, or alignments.'),
@@ -496,6 +600,53 @@ server.registerTool(
     }
   },
   async (args) => textResult(await callHttpTool(config, 'functree_project_summary', args))
+);
+
+server.registerTool(
+  'functree_get_programming_context',
+  {
+    title: 'Get programming context for a feature',
+    description:
+      'Return action-oriented programming context for a feature: required entry points, key code references, related product capabilities, alignments, impacted features, evidence, risks, acceptance criteria, verification hints, and quality issues.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      featureId: z.string().optional().describe('Concrete feature ID. Optional when featureStableKey is provided.'),
+      featureStableKey: z.string().optional().describe('Feature stableKey to resolve. Use with mapStableKey/mapId when needed.'),
+      mapId: z.string().optional().describe('Optional map ID for featureStableKey disambiguation.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey for featureStableKey disambiguation.'),
+      featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
+      depth: z.number().int().min(0).max(3).optional().describe('How far to include parent/child/aligned features. Defaults to 1.'),
+      include: z.array(z.enum(programmingContextIncludes)).min(1).max(8).optional().describe('Context sections to include. Defaults to all sections.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_get_programming_context', args))
+);
+
+server.registerTool(
+  'functree_quality_report',
+  {
+    title: 'Get FuncTree quality report',
+    description:
+      'Return quality gaps for a project: missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress/blocked details, missing mock boundaries, and optionally missing file paths.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      repoRoot: z.string().optional().describe('Optional local repository root used for path existence checks.'),
+      includePathChecks: z.boolean().optional().describe('When true and repoRoot is set, check whether code reference paths exist.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_quality_report', args))
 );
 
 server.registerTool(

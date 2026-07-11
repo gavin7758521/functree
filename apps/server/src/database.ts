@@ -72,6 +72,26 @@ function migrate(db: Db): void {
       UNIQUE(map_id, stable_key, version)
     );
 
+    CREATE TABLE IF NOT EXISTS feature_details (
+      feature_id TEXT PRIMARY KEY REFERENCES features(id) ON DELETE CASCADE,
+      intent TEXT NOT NULL DEFAULT '',
+      current_behavior TEXT NOT NULL DEFAULT '',
+      expected_behavior TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT '',
+      known_gaps_json TEXT NOT NULL DEFAULT '[]',
+      open_questions_json TEXT NOT NULL DEFAULT '[]',
+      acceptance_criteria_json TEXT NOT NULL DEFAULT '[]',
+      risks_json TEXT NOT NULL DEFAULT '[]',
+      blocker TEXT NOT NULL DEFAULT '',
+      replacement TEXT NOT NULL DEFAULT '',
+      deprecated_reason TEXT NOT NULL DEFAULT '',
+      mock_boundary TEXT NOT NULL DEFAULT '',
+      details_markdown TEXT NOT NULL DEFAULT '',
+      last_verified_at TEXT NOT NULL DEFAULT '',
+      last_verified_commit TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS entry_points (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -112,6 +132,27 @@ function migrate(db: Db): void {
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS evidence (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      evidence_type TEXT NOT NULL,
+      signature TEXT NOT NULL,
+      path TEXT NOT NULL DEFAULT '',
+      symbol TEXT NOT NULL DEFAULT '',
+      line_start INTEGER,
+      line_end INTEGER,
+      summary TEXT NOT NULL DEFAULT '',
+      confidence REAL NOT NULL DEFAULT 1,
+      commit_sha TEXT NOT NULL DEFAULT '',
+      verified_at TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, signature)
     );
 
     CREATE TABLE IF NOT EXISTS scan_runs (
@@ -169,6 +210,7 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_features_project ON features(project_id);
     CREATE INDEX IF NOT EXISTS idx_features_map ON features(map_id);
     CREATE INDEX IF NOT EXISTS idx_features_parent ON features(parent_feature_id);
+    CREATE INDEX IF NOT EXISTS idx_feature_details_feature ON feature_details(feature_id);
     CREATE INDEX IF NOT EXISTS idx_entry_points_project ON entry_points(project_id);
     CREATE INDEX IF NOT EXISTS idx_entry_points_map ON entry_points(map_id);
     CREATE INDEX IF NOT EXISTS idx_entry_points_path ON entry_points(path);
@@ -177,6 +219,9 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_code_references_feature ON code_references(feature_id);
     CREATE INDEX IF NOT EXISTS idx_code_references_entry_point ON code_references(entry_point_id);
     CREATE INDEX IF NOT EXISTS idx_code_references_path ON code_references(path);
+    CREATE INDEX IF NOT EXISTS idx_evidence_project ON evidence(project_id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_target ON evidence(target_type, target_id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_type ON evidence(evidence_type);
     CREATE INDEX IF NOT EXISTS idx_scan_runs_project ON scan_runs(project_id);
     CREATE INDEX IF NOT EXISTS idx_scan_runs_repo_commit ON scan_runs(project_id, repo_key, branch, commit_sha);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_code_references_project_stable_key
@@ -201,6 +246,10 @@ function migrate(db: Db): void {
   ensureColumn(db, 'code_references', 'last_seen_scan_run_id', 'TEXT');
   ensureColumn(db, 'code_references', 'last_seen_commit_sha', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'code_references', 'last_scanned_at', 'TEXT');
+  ensureColumn(db, 'code_references', 'role_in_feature', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'code_references', 'change_guidance', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'code_references', 'verification_hint', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'code_references', 'blast_radius', "TEXT NOT NULL DEFAULT ''");
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_entry_points_last_seen_scan ON entry_points(last_seen_scan_run_id);

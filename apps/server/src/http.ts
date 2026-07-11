@@ -3,11 +3,14 @@ import {
   CreateAlignmentSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
+  CreateEvidenceSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
   FinishScanSchema,
+  ProgrammingContextSchema,
   ProjectSummarySchema,
+  QualityReportSchema,
   QueryPathContextSchema,
   QueryContextSchema,
   ResolveStableKeysSchema,
@@ -89,6 +92,12 @@ export function createHttpServer(db: Db): FastifyInstance {
   app.get('/api/projects/:projectId', async (request) => repo.getProject(params(request).projectId));
   app.get('/api/projects/:projectId/tree', async (request) => repo.getProjectTree(params(request).projectId));
   app.get('/api/projects/:projectId/summary', async (request) => repo.projectSummary(ProjectSummarySchema.parse({ projectId: params(request).projectId })));
+  app.post('/api/projects/:projectId/programming-context', async (request) =>
+    repo.programmingContext(ProgrammingContextSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.get('/api/projects/:projectId/quality-report', async (request) =>
+    repo.qualityReport(QualityReportSchema.parse({ ...(request.query as Record<string, unknown>), projectId: params(request).projectId }))
+  );
 
   app.get('/api/projects/:projectId/maps', async (request) => repo.listMaps(params(request).projectId));
   app.post('/api/projects/:projectId/maps', async (request) => {
@@ -112,6 +121,12 @@ export function createHttpServer(db: Db): FastifyInstance {
   app.post('/api/projects/:projectId/code-references', async (request) => {
     const input = CreateCodeReferenceSchema.parse(request.body);
     return repo.createCodeReference(params(request).projectId, input);
+  });
+
+  app.get('/api/projects/:projectId/evidence', async (request) => repo.listEvidence(params(request).projectId));
+  app.post('/api/projects/:projectId/evidence', async (request) => {
+    const input = CreateEvidenceSchema.parse(request.body);
+    return repo.upsertEvidence(params(request).projectId, input);
   });
 
   app.get('/api/projects/:projectId/alignments', async (request) => repo.listAlignments(params(request).projectId));

@@ -421,4 +421,87 @@ describe('FuncTree 服务端', () => {
     expect(pathContext.maps[0].stableKey).toBe('web.scan');
     expect(reference.lastSeenCommitSha).toBe('abcdef1');
   });
+
+  it('支持功能详情、证据、编程上下文和质量报告', () => {
+    const repo = new FuncTreeRepository(openMemoryDatabase());
+    const project = repo.createProject({ id: 'proj_ai_context', name: 'AI 编程上下文', currentVersion: '1.0', status: 'active' });
+    const product = repo.createMap(project.id, { id: 'map_ai_product', stableKey: 'product.chat', name: '聊天产品能力', version: '1.0', axis: 'product', scope: 'capability', kind: 'domain' });
+    const backend = repo.createMap(project.id, { id: 'map_ai_backend', stableKey: 'backend.chat', name: '聊天后端', version: '1.0', axis: 'backend', scope: 'implementation', kind: 'service' });
+    const productFeature = repo.createFeature(product.id, { id: 'feat_product_send', stableKey: 'message.send-text', name: '发送文本消息', version: '1.0', status: 'released' });
+    const backendFeature = repo.createFeature(backend.id, {
+      id: 'feat_backend_send',
+      stableKey: 'message.send-text',
+      name: '发送文本消息 API',
+      version: '1.0',
+      status: 'in_progress',
+      kind: 'api',
+      details: {
+        intent: '让客户端发送文本消息。',
+        currentBehavior: '已接收请求并写入事件表。',
+        expectedBehavior: '完成权限检查、持久化和同步通知。',
+        scope: '包含文本消息，不包含媒体消息。',
+        acceptanceCriteria: ['成功发送后 timeline 可见', '无权限用户被拒绝'],
+        risks: ['权限规则变化会影响旧房间']
+      }
+    });
+    const entryPoint = repo.createEntryPoint(project.id, {
+      id: 'ep_backend_messages',
+      mapId: backend.id,
+      stableKey: 'backend.messages-api',
+      name: '消息 API',
+      path: 'src/messages.ts',
+      kind: 'http_api_root'
+    });
+    const reference = repo.createCodeReference(project.id, {
+      id: 'ref_backend_send',
+      mapId: backend.id,
+      featureId: backendFeature.id,
+      entryPointId: entryPoint.id,
+      stableKey: 'backend.messages.send',
+      path: 'src/messages.ts',
+      symbol: 'sendMessage',
+      kind: 'function',
+      roleInFeature: 'core_logic',
+      changeGuidance: '修改时同时检查 power level。',
+      verificationHint: '运行消息 API 测试。',
+      blastRadius: 'backend.chat'
+    });
+    const evidence = repo.upsertEvidence(project.id, {
+      targetType: 'feature',
+      targetStableKey: 'message.send-text',
+      mapStableKey: 'backend.chat',
+      version: '1.0',
+      evidenceType: 'code_fact',
+      path: 'src/messages.ts',
+      symbol: 'sendMessage',
+      summary: '代码中存在发送文本消息处理。',
+      commitSha: 'abcdef1'
+    });
+    const alignment = repo.upsertAlignment(project.id, {
+      stableKey: 'align.send.product-backend',
+      name: '发送消息产品到后端实现',
+      relation: 'backend_implements',
+      status: 'confirmed',
+      members: [
+        { targetType: 'feature', targetId: productFeature.id, role: 'source' },
+        { targetType: 'feature', targetId: backendFeature.id, role: 'target' },
+        { targetType: 'code_reference', targetId: reference.id, role: 'evidence' }
+      ]
+    });
+    const query = repo.queryContext({ projectId: project.id, types: ['feature', 'evidence'], includeDetails: true, stableKey: 'message.send-text', mapStableKey: 'backend.chat' });
+    const programming = repo.programmingContext({ projectId: project.id, featureStableKey: 'message.send-text', mapStableKey: 'backend.chat', featureVersion: '1.0', depth: 1 });
+    const report = repo.qualityReport({ projectId: project.id });
+
+    expect(evidence.operation).toBe('created');
+    expect(alignment.data.relation).toBe('backend_implements');
+    expect(query.features[0]).toMatchObject({ id: backendFeature.id, details: expect.objectContaining({ intent: '让客户端发送文本消息。' }) });
+    expect(query.evidence[0]).toMatchObject({ evidenceType: 'code_fact', targetId: backendFeature.id });
+    expect(programming.requiredEntryPoints[0].id).toBe(entryPoint.id);
+    expect(programming.keyCodeReferences[0].verificationHint).toBe('运行消息 API 测试。');
+    expect(programming.relatedProductCapabilities[0].id).toBe(productFeature.id);
+    expect(programming.evidence[0].evidenceType).toBe('code_fact');
+    expect(programming.qualityIssues.some((issue) => issue.code === 'IN_PROGRESS_DETAIL_GAP')).toBe(false);
+    expect(report.summary.featuresWithoutCodeReferences).toBe(1);
+    expect(report.summary.featuresWithoutCodeEvidence).toBe(1);
+  });
 });

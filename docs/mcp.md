@@ -81,6 +81,9 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_code_reference]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_evidence]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
@@ -96,6 +99,9 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_code_references_batch]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_evidence_batch]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
 
@@ -106,7 +112,7 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-`functree_query_context`、`functree_resolve_stable_keys`、`functree_project_summary`、`functree_query_path_context` 是只读查询工具，可以不配置审批。
+`functree_query_context`、`functree_resolve_stable_keys`、`functree_project_summary`、`functree_get_programming_context`、`functree_quality_report`、`functree_query_path_context` 是只读查询工具，可以不配置审批。
 
 ## 让 Codex 分析项目
 
@@ -117,9 +123,11 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 1. Project
 2. Maps，例如 product.chat、web.chat-ui、backend.matrix-chat-core
 3. 每个 Map 下的核心 Feature
-4. EntryPoint 和 CodeReference
-5. 产品、前端、后端、测试之间的 Alignment
-写入前先调用 functree_query_context 或 functree_resolve_stable_keys 查重；大量写入先 dryRun。扫描仓库时先 functree_begin_scan，写入入口文件和代码引用时带 scanRunId，结束后 functree_finish_scan。
+4. 未上线、mock、blocked 或 in_progress Feature 的 details，包括 intent、scope、currentBehavior、expectedBehavior、knownGaps、acceptanceCriteria、risks
+5. EntryPoint 和 CodeReference，并给关键代码引用写 roleInFeature、changeGuidance、verificationHint
+6. Evidence，区分 code_fact、doc_claim、inferred、planned、mock_only、deprecated
+7. 产品、前端、后端、SDK、运维、测试之间的 Alignment
+写入前先调用 functree_query_context 或 functree_resolve_stable_keys 查重；大量写入先 dryRun。扫描仓库时先 functree_begin_scan，写入入口文件、代码引用和 evidence 时带 commit/scan 信息，结束后 functree_finish_scan。准备修改某个功能前，先调用 functree_get_programming_context；同步后调用 functree_quality_report 检查缺口。
 ```
 
 ## 工具
@@ -160,6 +168,7 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `description`
 - `owner`
 - `tags`
+- `details`
 - `metadata`
 - `dryRun`
 
@@ -237,8 +246,42 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `description`
 - `lineStart`
 - `lineEnd`
+- `roleInFeature`
+- `changeGuidance`
+- `verificationHint`
+- `blastRadius`
 - `metadata`
 - `dryRun`
+
+### functree_upsert_evidence
+
+记录判断依据，避免把真实代码事实、文档声称、推断、计划和 mock 混在一起。按 `id` 或证据签名查重。
+
+必填：
+
+- `projectId`
+- `targetType`
+- `evidenceType`
+
+可选：
+
+- `id`
+- `targetId`
+- `targetStableKey`
+- `mapStableKey`
+- `featureVersion`
+- `path`
+- `symbol`
+- `lineStart`
+- `lineEnd`
+- `summary`
+- `confidence`
+- `commitSha`
+- `verifiedAt`
+- `metadata`
+- `dryRun`
+
+`targetId` 和 `targetStableKey` 至少传一个。常用 `evidenceType` 包括 `code_fact`、`doc_claim`、`inferred`、`planned`、`mock_only`、`deprecated`。
 
 ### functree_upsert_alignment
 
@@ -260,6 +303,7 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `functree_upsert_features_batch`
 - `functree_upsert_entry_points_batch`
 - `functree_upsert_code_references_batch`
+- `functree_upsert_evidence_batch`
 - `functree_upsert_alignments_batch`
 
 每个 batch 支持 `dryRun: true`。写入模式下如果某一项失败，会回滚本批次已写入项，并返回 `errors[index, code, message, hint]`。
@@ -283,11 +327,12 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `projectId`
 - `keyword`
 - `limit`：1 到 200，默认 20
-- `types`：例如 `["feature"]`
+- `types`：例如 `["feature"]` 或 `["feature", "evidence"]`
 - `view`：`full` / `lite`。`lite` 只返回 `id/stableKey/name/type/mapId/path` 等轻量字段
 - `includeSummaryOnly`
 - `includeMembers`：查询 alignment 时可设为 `false` 降低上下文体积
 - `includeMetadata`
+- `includeDetails`：查询 feature 时带出结构化详情
 - `mapId`
 - `mapStableKey`
 - `stableKey`
@@ -300,7 +345,7 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `offset`
 - `cursor`
 
-返回包含 `page.nextCursor`，下一页请求传入 `cursor` 即可。`summary` 返回功能地图数、功能数、入口文件数、代码引用数、对齐关系数、扫描数、最近更新时间、最近扫描、stableKey 冲突数和孤儿代码引用数。
+返回包含 `page.nextCursor`，下一页请求传入 `cursor` 即可。`summary` 返回功能地图数、功能数、入口文件数、代码引用数、evidence 数、对齐关系数、扫描数、最近更新时间、最近扫描、stableKey 冲突数和孤儿代码引用数。
 
 ### functree_resolve_stable_keys
 
@@ -324,6 +369,38 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 必填：
 
 - `projectId`
+
+### functree_get_programming_context
+
+面向 AI 编程的读取视图。准备修改某个功能时，用它获取按优先级组织的入口文件、关键代码引用、对齐关系、影响功能、风险、验收项、证据和质量问题。
+
+必填：
+
+- `projectId`
+- `featureId`，或 `featureStableKey`
+
+可选：
+
+- `mapId`
+- `mapStableKey`
+- `featureVersion`
+- `depth`：0 到 3
+- `include`：例如 `["entryPoints", "codeReferences", "alignments", "evidence", "quality"]`
+
+### functree_quality_report
+
+项目级质量报告，用于同步后发现缺口。
+
+必填：
+
+- `projectId`
+
+可选：
+
+- `repoRoot`
+- `includePathChecks`
+
+报告会列出没有代码引用、没有 alignment、缺少 `code_fact` evidence、草稿/进行中/阻塞/废弃/mock 功能详情不足，以及可选的代码路径不存在问题。
 
 ### functree_query_path_context
 
