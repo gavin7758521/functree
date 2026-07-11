@@ -1192,6 +1192,167 @@ pre,
   margin-top: 12px;
 }
 
+.featureSignalStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0 0 12px;
+}
+
+.featureSignalStrip span {
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  padding: 8px 9px;
+  display: grid;
+  gap: 2px;
+}
+
+.featureSignalStrip strong {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.featureSignalStrip small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.detailStack {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.compactStack {
+  margin-top: 12px;
+}
+
+.detailText {
+  min-width: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  padding: 10px 11px;
+}
+
+.detailText.compact {
+  background: transparent;
+  padding: 0;
+}
+
+.detailText h3 {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.detailText p,
+.detailText ul {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.detailText ul {
+  padding-left: 17px;
+}
+
+.detailText li + li {
+  margin-top: 4px;
+}
+
+.markdownDetail p {
+  white-space: pre-wrap;
+}
+
+.emptyDetailBlock {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  border-radius: var(--radius-md);
+  background: var(--amber-soft);
+  padding: 11px;
+  color: var(--amber);
+}
+
+.emptyDetailBlock strong {
+  font-size: 13px;
+}
+
+.emptyDetailBlock span {
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.referenceCards,
+.evidenceList {
+  display: grid;
+  gap: 7px;
+}
+
+.referenceCard,
+.evidenceItem {
+  min-width: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  padding: 10px 11px;
+  box-shadow: var(--shadow-border);
+}
+
+.referenceCard header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.referenceCard header strong,
+.evidenceItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.referenceCard header span,
+.evidenceItem strong {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.referenceCard > small,
+.evidenceItem small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.referenceCard .detailText {
+  margin-top: 8px;
+}
+
+.evidenceItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 8px;
+  align-items: center;
+}
+
+.evidenceItem small {
+  grid-column: 1 / -1;
+}
+
 .creatorSlot {
   display: grid;
   gap: 10px;
@@ -1445,7 +1606,8 @@ pre {
   }
 
   .infoGrid,
-  .formGrid {
+  .formGrid,
+  .featureSignalStrip {
     grid-template-columns: 1fr;
   }
 

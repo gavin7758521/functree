@@ -981,7 +981,7 @@ export class FuncTreeRepository {
   getProjectTree(projectId: string) {
     const project = this.getProject(projectId);
     const maps = this.listMaps(projectId);
-    const features = this.listFeatures(projectId);
+    const features = this.listFeatures(projectId).map((feature) => this.attachFeatureDetails(feature, true));
     return {
       project,
       maps: maps.map((featureMap) => ({
@@ -990,6 +990,7 @@ export class FuncTreeRepository {
       })),
       entryPoints: this.listEntryPoints(projectId),
       codeReferences: this.listCodeReferences(projectId),
+      evidence: this.listEvidence(projectId),
       alignments: this.listAlignments(projectId)
     };
   }

@@ -21,7 +21,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Alignment, Catalog, CodeReference, EntryPoint, Feature, FuncMap, Overview, Project, ProjectTree } from './types.js';
+import type { Alignment, Catalog, CodeReference, EntryPoint, Evidence, Feature, FeatureDetail as FeatureDetailData, FuncMap, Overview, Project, ProjectTree } from './types.js';
 
 type View = 'overview' | 'maps' | 'features' | 'entryPoints' | 'references' | 'alignments' | 'mcp';
 
@@ -582,6 +582,11 @@ function FeatureTreeView({
     : selectedMapFeatures;
   const featureCount = tree.maps.reduce((count, map) => count + flattenFeatures(map.features ?? []).length, 0);
   const alignments = selected ? tree.alignments.filter((alignment) => alignment.members.some((member) => member.targetType === 'feature' && member.targetId === selected.id)) : [];
+  const codeReferences = selected ? tree.codeReferences.filter((reference) => reference.featureId === selected.id) : [];
+  const codeReferenceIds = new Set(codeReferences.map((reference) => reference.id));
+  const evidence = selected
+    ? (tree.evidence ?? []).filter((item) => (item.targetType === 'feature' && item.targetId === selected.id) || (item.targetType === 'code_reference' && codeReferenceIds.has(item.targetId)))
+    : [];
   return (
     <section className="content workbench">
       <div className="workMain">
@@ -654,7 +659,7 @@ function FeatureTreeView({
         </div>
       </div>
       <aside className="workSide">
-        <FeatureDetail tree={tree} feature={selected} labels={labels} alignments={alignments} />
+        <FeatureDetail tree={tree} feature={selected} labels={labels} alignments={alignments} codeReferences={codeReferences} evidence={evidence} />
         <CreatorSlot label="新建功能">
           <FeatureCreator tree={tree} selectedMapId={selectedMapId} onCreated={onCreated} />
         </CreatorSlot>
@@ -974,14 +979,21 @@ function FeatureDetail({
   tree,
   feature,
   labels,
-  alignments
+  alignments,
+  codeReferences,
+  evidence
 }: {
   tree: ProjectTree;
   feature: Feature | undefined;
   labels: Catalog['labels'] | undefined;
   alignments: Alignment[];
+  codeReferences: CodeReference[];
+  evidence: Evidence[];
 }) {
   if (!feature) return <EmptyState title="未选择功能" />;
+  const details = feature.details;
+  const hasDetails = hasFeatureDetails(details);
+  const detailCount = details ? featureDetailFieldCount(details) : 0;
   return (
     <section className="panel inspectorPanel">
       <div className="sectionHeader">
@@ -989,6 +1001,12 @@ function FeatureDetail({
         <span>{labels?.featureStatus[feature.status] ?? feature.status}</span>
       </div>
       <Description value={feature.description} empty="暂无功能说明" />
+      <div className="featureSignalStrip">
+        <Signal label="详情" value={detailCount} />
+        <Signal label="引用" value={codeReferences.length} />
+        <Signal label="证据" value={evidence.length} />
+        <Signal label="对齐" value={alignments.length} />
+      </div>
       <InfoGrid
         items={[
           ['ID', feature.id],
@@ -1001,13 +1019,110 @@ function FeatureDetail({
         ]}
       />
       <TagList values={feature.tags} />
+      {hasDetails ? (
+        <div className="detailStack">
+          <DetailText title="意图" value={details?.intent} />
+          <DetailText title="当前行为" value={details?.currentBehavior} />
+          <DetailText title="目标行为" value={details?.expectedBehavior} />
+          <DetailText title="范围" value={details?.scope} />
+          <DetailList title="已知缺口" values={details?.knownGaps} />
+          <DetailList title="未决问题" values={details?.openQuestions} />
+          <DetailList title="验收条件" values={details?.acceptanceCriteria} />
+          <DetailList title="风险" values={details?.risks} />
+          <DetailText title="阻塞" value={details?.blocker} />
+          <DetailText title="替代能力" value={details?.replacement} />
+          <DetailText title="废弃原因" value={details?.deprecatedReason} />
+          <DetailText title="Mock 边界" value={details?.mockBoundary} />
+          <DetailText title="最后验证" value={verificationText(details)} />
+          <DetailMarkdown value={details?.detailsMarkdown} />
+        </div>
+      ) : (
+        <div className="emptyDetailBlock">
+          <strong>暂无深度详情</strong>
+          <span>{feature.status === 'released' || feature.status === 'completed' ? '已上线功能可保持轻量事实索引。' : '当前状态适合补充意图、范围、缺口、验收和风险。'}</span>
+        </div>
+      )}
+      <div className="detailBlock">
+        <h3>代码引用</h3>
+        <div className="referenceCards">
+          {codeReferences.map((reference) => (
+            <article key={reference.id} className="referenceCard">
+              <header>
+                <strong>{reference.symbol || reference.path}</strong>
+                <span>{codeReferenceRoleLabel(reference, labels)}</span>
+              </header>
+              <small>{reference.path}{lineRange(reference) === '未设置' ? '' : `:${lineRange(reference)}`}</small>
+              <DetailText title="修改提示" value={reference.changeGuidance} compact />
+              <DetailText title="验证提示" value={reference.verificationHint} compact />
+              <DetailText title="影响范围" value={reference.blastRadius} compact />
+            </article>
+          ))}
+          {codeReferences.length === 0 ? <small>暂无</small> : null}
+        </div>
+      </div>
+      <div className="detailBlock">
+        <h3>证据</h3>
+        <div className="evidenceList">
+          {evidence.map((item) => (
+            <article key={item.id} className="evidenceItem">
+              <strong>{labels?.evidenceType[item.evidenceType] ?? item.evidenceType}</strong>
+              <span>{item.summary || item.symbol || item.path || item.id}</span>
+              <small>{evidenceMeta(item)}</small>
+            </article>
+          ))}
+          {evidence.length === 0 ? <small>暂无</small> : null}
+        </div>
+      </div>
       <div className="detailBlock">
         <h3>相关对齐</h3>
         {alignments.map((alignment) => (
-          <span key={alignment.id}>{alignment.name}</span>
+          <span key={alignment.id}>{alignment.name} / {labels?.alignmentRelation[alignment.relation] ?? alignment.relation}</span>
         ))}
         {alignments.length === 0 ? <small>暂无</small> : null}
       </div>
+    </section>
+  );
+}
+
+function Signal({ label, value }: { label: string; value: number }) {
+  return (
+    <span>
+      <strong>{value}</strong>
+      <small>{label}</small>
+    </span>
+  );
+}
+
+function DetailText({ title, value, compact = false }: { title: string; value: string | undefined; compact?: boolean }) {
+  if (!value) return null;
+  return (
+    <section className={compact ? 'detailText compact' : 'detailText'}>
+      <h3>{title}</h3>
+      <p>{value}</p>
+    </section>
+  );
+}
+
+function DetailList({ title, values }: { title: string; values: string[] | undefined }) {
+  if (!values?.length) return null;
+  return (
+    <section className="detailText">
+      <h3>{title}</h3>
+      <ul>
+        {values.map((value) => (
+          <li key={value}>{value}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function DetailMarkdown({ value }: { value: string | undefined }) {
+  if (!value) return null;
+  return (
+    <section className="detailText markdownDetail">
+      <h3>详情正文</h3>
+      <p>{value}</p>
     </section>
   );
 }
@@ -1052,9 +1167,15 @@ function CodeReferenceDetail({ reference, tree, labels }: { reference: CodeRefer
           ['稳定键', reference.stableKey || '未设置'],
           ['路径', reference.path],
           ['符号', reference.symbol || '无'],
+          ['角色', codeReferenceRoleLabel(reference, labels)],
           ['行号', lineRange(reference)]
         ]}
       />
+      <div className="detailStack compactStack">
+        <DetailText title="修改提示" value={reference.changeGuidance} />
+        <DetailText title="验证提示" value={reference.verificationHint} />
+        <DetailText title="影响范围" value={reference.blastRadius} />
+      </div>
     </section>
   );
 }
@@ -1540,6 +1661,48 @@ function TagList({ values }: { values: string[] }) {
       ))}
     </div>
   );
+}
+
+function hasFeatureDetails(details: FeatureDetailData | undefined): details is FeatureDetailData {
+  return featureDetailFieldCount(details) > 0;
+}
+
+function featureDetailFieldCount(details: FeatureDetailData | undefined): number {
+  if (!details) return 0;
+  return [
+    details.intent,
+    details.currentBehavior,
+    details.expectedBehavior,
+    details.scope,
+    details.blocker,
+    details.replacement,
+    details.deprecatedReason,
+    details.mockBoundary,
+    details.detailsMarkdown,
+    details.lastVerifiedAt,
+    details.lastVerifiedCommit,
+    ...details.knownGaps,
+    ...details.openQuestions,
+    ...details.acceptanceCriteria,
+    ...details.risks
+  ].filter(Boolean).length;
+}
+
+function verificationText(details: FeatureDetailData | undefined): string {
+  if (!details?.lastVerifiedAt && !details?.lastVerifiedCommit) return '';
+  return [details.lastVerifiedAt, details.lastVerifiedCommit].filter(Boolean).join(' / ');
+}
+
+function evidenceMeta(item: Evidence): string {
+  const location = item.path ? `${item.path}${item.lineStart ? `:${item.lineStart}${item.lineEnd ? `-${item.lineEnd}` : ''}` : ''}` : '';
+  const commit = item.commitSha ? `commit ${item.commitSha}` : '';
+  const confidence = Number.isFinite(item.confidence) ? `置信度 ${item.confidence.toFixed(2)}` : '';
+  return [location, commit, confidence].filter(Boolean).join(' / ') || item.targetType;
+}
+
+function codeReferenceRoleLabel(reference: CodeReference, labels: Catalog['labels'] | undefined): string {
+  if (reference.roleInFeature) return labels?.codeReferenceRoleInFeature[reference.roleInFeature] ?? reference.roleInFeature;
+  return labels?.codeReferenceKind[reference.kind] ?? reference.kind;
 }
 
 function flattenFeatures(features: Feature[]): Feature[] {

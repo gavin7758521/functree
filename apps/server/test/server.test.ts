@@ -491,11 +491,15 @@ describe('FuncTree 服务端', () => {
     const query = repo.queryContext({ projectId: project.id, types: ['feature', 'evidence'], includeDetails: true, stableKey: 'message.send-text', mapStableKey: 'backend.chat' });
     const programming = repo.programmingContext({ projectId: project.id, featureStableKey: 'message.send-text', mapStableKey: 'backend.chat', featureVersion: '1.0', depth: 1 });
     const report = repo.qualityReport({ projectId: project.id });
+    const tree = repo.getProjectTree(project.id);
+    const treeBackendFeature = tree.maps.find((map) => map.id === backend.id)?.features?.[0];
 
     expect(evidence.operation).toBe('created');
     expect(alignment.data.relation).toBe('backend_implements');
     expect(query.features[0]).toMatchObject({ id: backendFeature.id, details: expect.objectContaining({ intent: '让客户端发送文本消息。' }) });
     expect(query.evidence[0]).toMatchObject({ evidenceType: 'code_fact', targetId: backendFeature.id });
+    expect(treeBackendFeature).toMatchObject({ id: backendFeature.id, details: expect.objectContaining({ expectedBehavior: '完成权限检查、持久化和同步通知。' }) });
+    expect(tree.evidence[0]).toMatchObject({ targetId: backendFeature.id, summary: '代码中存在发送文本消息处理。' });
     expect(programming.requiredEntryPoints[0].id).toBe(entryPoint.id);
     expect(programming.keyCodeReferences[0].verificationHint).toBe('运行消息 API 测试。');
     expect(programming.relatedProductCapabilities[0].id).toBe(productFeature.id);

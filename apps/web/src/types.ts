@@ -8,6 +8,8 @@ export type Catalog = {
     featureStatus: Record<string, string>;
     entryPointKind: Record<string, string>;
     codeReferenceKind: Record<string, string>;
+    codeReferenceRoleInFeature: Record<string, string>;
+    evidenceType: Record<string, string>;
     alignmentRelation: Record<string, string>;
     alignmentStatus: Record<string, string>;
   };
@@ -50,7 +52,27 @@ export type Feature = {
   kind: string;
   tags: string[];
   description: string;
+  details?: FeatureDetail;
   children?: Feature[];
+};
+
+export type FeatureDetail = {
+  intent: string;
+  currentBehavior: string;
+  expectedBehavior: string;
+  scope: string;
+  knownGaps: string[];
+  openQuestions: string[];
+  acceptanceCriteria: string[];
+  risks: string[];
+  blocker: string;
+  replacement: string;
+  deprecatedReason: string;
+  mockBoundary: string;
+  detailsMarkdown: string;
+  lastVerifiedAt: string;
+  lastVerifiedCommit: string;
+  updatedAt: string;
 };
 
 export type EntryPoint = {
@@ -76,8 +98,29 @@ export type CodeReference = {
   symbol: string;
   kind: string;
   description: string;
+  roleInFeature: string;
+  changeGuidance: string;
+  verificationHint: string;
+  blastRadius: string;
   lineStart: number | null;
   lineEnd: number | null;
+};
+
+export type Evidence = {
+  id: string;
+  projectId: string;
+  targetType: string;
+  targetId: string;
+  evidenceType: string;
+  path: string;
+  symbol: string;
+  lineStart: number | null;
+  lineEnd: number | null;
+  summary: string;
+  confidence: number;
+  commitSha: string;
+  verifiedAt: string;
+  label?: string;
 };
 
 export type Alignment = {
@@ -115,5 +158,6 @@ export type ProjectTree = {
   maps: FuncMap[];
   entryPoints: EntryPoint[];
   codeReferences: CodeReference[];
+  evidence: Evidence[];
   alignments: Alignment[];
 };
