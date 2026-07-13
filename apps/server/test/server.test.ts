@@ -508,4 +508,97 @@ describe('FuncTree 服务端', () => {
     expect(report.summary.featuresWithoutCodeReferences).toBe(1);
     expect(report.summary.featuresWithoutCodeEvidence).toBe(1);
   });
+
+  it('支持能力状态矩阵和结构化缺口', () => {
+    const repo = new FuncTreeRepository(openMemoryDatabase());
+    const project = repo.createProject({ id: 'proj_matrix', name: '能力矩阵项目', currentVersion: '1.0', status: 'active' });
+    const product = repo.createMap(project.id, { id: 'map_matrix_product', stableKey: 'product.ai-assistant', name: 'AI 助手产品', version: '1.0', axis: 'product', scope: 'capability', kind: 'domain' });
+    const web = repo.createMap(project.id, { id: 'map_matrix_web', stableKey: 'web.ai-assistant', name: 'AI 助手前端', version: '1.0', axis: 'web', scope: 'implementation', kind: 'app' });
+    const backend = repo.createMap(project.id, { id: 'map_matrix_backend', stableKey: 'backend.airoom-bots', name: 'Bot 后端', version: '1.0', axis: 'backend', scope: 'implementation', kind: 'service' });
+    const canonical = repo.createFeature(product.id, { id: 'feat_matrix_add_ai', stableKey: 'add-external-ai', name: '添加外部 AI', version: '1.0', status: 'draft' });
+    const mockFeature = repo.createFeature(web.id, { id: 'feat_matrix_web_add_ai', stableKey: 'add-external-ai', name: '添加 AI Mock', version: '1.0', status: 'mock_only' });
+    const backendFeature = repo.createFeature(backend.id, { id: 'feat_matrix_backend_create_bot', stableKey: 'bots.create', name: '创建 Bot', version: '1.0', status: 'released' });
+    const prototypeEvidence = repo.upsertEvidence(project.id, {
+      targetType: 'feature',
+      targetId: canonical.id,
+      evidenceType: 'planned',
+      sourceType: 'product_prototype',
+      sourcePriority: 40,
+      path: 'prototype/ai-add-external.html',
+      summary: '产品原型定义添加外部 AI 入口。'
+    });
+    const backendEvidence = repo.upsertEvidence(project.id, {
+      targetType: 'feature',
+      targetId: backendFeature.id,
+      evidenceType: 'code_fact',
+      sourceType: 'api_route',
+      sourcePriority: 70,
+      path: 'synapse/rest/client/airoom/bots.py',
+      symbol: '/_synapse/client/airoom/bots',
+      summary: '后端存在 Bot 创建 API。'
+    });
+
+    repo.upsertAlignment(project.id, {
+      stableKey: 'align.add-ai.web-mock',
+      name: '添加 AI 产品入口和前端 Mock',
+      relation: 'mock_of',
+      members: [
+        { targetType: 'feature', targetId: canonical.id, role: 'source' },
+        { targetType: 'feature', targetId: mockFeature.id, role: 'target' }
+      ]
+    });
+
+    const productStatus = repo.upsertCapabilityStatus(project.id, {
+      canonicalFeatureId: canonical.id,
+      mapId: product.id,
+      featureId: canonical.id,
+      status: 'prototype',
+      summary: '完整产品原型。',
+      evidenceIds: [prototypeEvidence.data.id]
+    });
+    const webStatus = repo.upsertCapabilityStatus(project.id, {
+      canonicalFeatureId: canonical.id,
+      mapId: web.id,
+      featureId: mockFeature.id,
+      status: 'mock',
+      summary: 'AI 助手页仍是 mock。',
+      gaps: ['产品入口未接真实 API']
+    });
+    const backendStatus = repo.upsertCapabilityStatus(project.id, {
+      canonicalFeatureId: canonical.id,
+      mapId: backend.id,
+      featureId: backendFeature.id,
+      status: 'live',
+      summary: 'Bot 创建 API 可用。',
+      evidenceIds: [backendEvidence.data.id]
+    });
+    const gap = repo.upsertCapabilityGap(project.id, {
+      stableKey: 'gap.add-ai.product-web-backend',
+      canonicalFeatureId: canonical.id,
+      mapId: web.id,
+      featureId: mockFeature.id,
+      gapType: 'mock_gap',
+      severity: 'high',
+      title: '产品添加 AI 入口未接后端 Bot API',
+      description: 'web.ai-assistant 是 mock，backend.airoom-bots 已有真实 API。',
+      evidenceIds: [prototypeEvidence.data.id, backendEvidence.data.id],
+      recommendedAction: '用后端 bots API 替换 AI 助手页 mock，并参考设置页 Bot 管理流程。',
+      ownerMapId: web.id
+    });
+    const matrix = repo.capabilityMatrix({ projectId: project.id, canonicalFeatureId: canonical.id });
+    const programming = repo.programmingContext({ projectId: project.id, featureId: canonical.id, include: ['statusMatrix', 'gaps', 'evidence', 'alignments'] });
+    const report = repo.qualityReport({ projectId: project.id });
+
+    expect(productStatus.operation).toBe('created');
+    expect(webStatus.data.status).toBe('mock');
+    expect(backendStatus.data.status).toBe('live');
+    expect(gap.data.gapType).toBe('mock_gap');
+    expect(matrix.summary.statusCounts).toMatchObject({ prototype: 1, mock: 1, live: 1 });
+    expect(matrix.summary.highSeverityGapCount).toBe(1);
+    expect(matrix.evidence.map((item) => item.sourceType)).toEqual(expect.arrayContaining(['product_prototype', 'api_route']));
+    expect(programming.capabilityMatrix?.statuses).toHaveLength(3);
+    expect(programming.capabilityGaps[0]).toMatchObject({ severity: 'high', recommendedAction: '用后端 bots API 替换 AI 助手页 mock，并参考设置页 Bot 管理流程。' });
+    expect(report.summary.openCapabilityGaps).toBe(1);
+    expect(report.summary.highSeverityCapabilityGaps).toBe(1);
+  });
 });

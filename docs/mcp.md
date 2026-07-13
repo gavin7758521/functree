@@ -84,6 +84,12 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_evidence]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_capability_status]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_capability_gap]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
@@ -102,6 +108,12 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_evidence_batch]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_capability_statuses_batch]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_capability_gaps_batch]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
 
@@ -112,7 +124,7 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-`functree_query_context`、`functree_resolve_stable_keys`、`functree_project_summary`、`functree_get_programming_context`、`functree_quality_report`、`functree_query_path_context` 是只读查询工具，可以不配置审批。
+`functree_query_context`、`functree_resolve_stable_keys`、`functree_project_summary`、`functree_get_capability_matrix`、`functree_get_programming_context`、`functree_quality_report`、`functree_query_path_context` 是只读查询工具，可以不配置审批。
 
 ## 让 Codex 分析项目
 
@@ -126,8 +138,10 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 4. 未上线、mock、blocked 或 in_progress Feature 的 details，包括 intent、scope、currentBehavior、expectedBehavior、knownGaps、acceptanceCriteria、risks
 5. EntryPoint 和 CodeReference，并给关键代码引用写 roleInFeature、changeGuidance、verificationHint
 6. Evidence，区分 code_fact、doc_claim、inferred、planned、mock_only、deprecated
-7. 产品、前端、后端、SDK、运维、测试之间的 Alignment
-写入前先调用 functree_query_context 或 functree_resolve_stable_keys 查重；大量写入先 dryRun。扫描仓库时先 functree_begin_scan，写入入口文件、代码引用和 evidence 时带 commit/scan 信息，结束后 functree_finish_scan。准备修改某个功能前，先调用 functree_get_programming_context；同步后调用 functree_quality_report 检查缺口。
+7. Capability Status Matrix，把 canonical feature 在 product/web/backend/sdk/ops 下标成 prototype/mock/partial/live/deployed/none
+8. Capability Gap，结构化记录 mock_gap、implementation_gap、naming_conflict、data_model_conflict、permission_conflict 等缺口和 recommendedAction
+9. 产品、前端、后端、SDK、运维、测试之间的 Alignment
+写入前先调用 functree_query_context 或 functree_resolve_stable_keys 查重；大量写入先 dryRun。扫描仓库时先 functree_begin_scan，写入入口文件、代码引用和 evidence 时带 commit/scan 信息，结束后 functree_finish_scan。准备修改某个功能前，先调用 functree_get_capability_matrix 和 functree_get_programming_context；同步后调用 functree_quality_report 检查缺口。
 ```
 
 ## 工具
@@ -276,12 +290,71 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `lineEnd`
 - `summary`
 - `confidence`
+- `sourceType`
+- `sourcePriority`
 - `commitSha`
 - `verifiedAt`
 - `metadata`
 - `dryRun`
 
 `targetId` 和 `targetStableKey` 至少传一个。常用 `evidenceType` 包括 `code_fact`、`doc_claim`、`inferred`、`planned`、`mock_only`、`deprecated`。
+`sourceType` 用于标明来源：`runtime_code`、`test`、`api_route`、`migration_schema`、`product_prototype`、`docs`、`inference`。建议优先级为运行代码 > 测试 > API/Schema > 原型 > 文档 > 推断。
+
+### functree_upsert_capability_status
+
+记录 canonical feature 在某个 map 下的实现状态，用于区分产品原型、前端 mock、后端真实 API、SDK 部分实现、运维已部署等。
+
+必填：
+
+- `projectId`
+- `canonicalFeatureId`，或 `canonicalFeatureStableKey`
+- `mapId`，或 `mapStableKey`
+
+可选：
+
+- `id`
+- `canonicalMapId`
+- `canonicalMapStableKey`
+- `canonicalFeatureVersion`
+- `featureId`
+- `featureStableKey`
+- `featureVersion`
+- `status`：`unknown` / `none` / `not_needed` / `prototype` / `spec` / `approved` / `mock` / `partial` / `live` / `configured` / `deployed` / `deprecated`
+- `summary`
+- `gaps`
+- `recommendedAction`
+- `evidenceIds`
+- `metadata`
+- `dryRun`
+
+### functree_upsert_capability_gap
+
+结构化记录能力缺口或冲突，例如同名不同义、mock 与真实 API 未打通、数据模型冲突、权限冲突、入口冲突等。
+
+必填：
+
+- `projectId`
+- `canonicalFeatureId`，或 `canonicalFeatureStableKey`
+- `title`
+- `gapType`
+
+可选：
+
+- `id`
+- `stableKey`
+- `mapId`
+- `mapStableKey`
+- `featureId`
+- `featureStableKey`
+- `severity`：`high` / `medium` / `low`
+- `status`：`open` / `accepted` / `resolved` / `ignored`
+- `description`
+- `evidenceIds`
+- `recommendedAction`
+- `ownerMapId`
+- `ownerMapStableKey`
+- `metadata`
+- `dryRun`
 
 ### functree_upsert_alignment
 
@@ -304,6 +377,8 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 - `functree_upsert_entry_points_batch`
 - `functree_upsert_code_references_batch`
 - `functree_upsert_evidence_batch`
+- `functree_upsert_capability_statuses_batch`
+- `functree_upsert_capability_gaps_batch`
 - `functree_upsert_alignments_batch`
 
 每个 batch 支持 `dryRun: true`。写入模式下如果某一项失败，会回滚本批次已写入项，并返回 `errors[index, code, message, hint]`。
@@ -369,6 +444,26 @@ FuncTree MCP 不会替 Codex 读取源码。Codex 在目标项目工作区内正
 必填：
 
 - `projectId`
+
+### functree_get_capability_matrix
+
+只读返回 canonical feature 的跨 map 状态矩阵，适合回答“这个能力是原型、mock、partial、live，还是后端支持但前端未接”。
+
+必填：
+
+- `projectId`
+
+可选：
+
+- `canonicalFeatureId`
+- `canonicalFeatureStableKey`
+- `canonicalMapId`
+- `canonicalMapStableKey`
+- `canonicalFeatureVersion`
+- `mapId`
+- `mapStableKey`
+- `includeGaps`
+- `includeEvidence`
 
 ### functree_get_programming_context
 

@@ -5,8 +5,13 @@ import {
   BatchFeatureSchema,
   BatchMapSchema,
   BatchEvidenceSchema,
+  BatchCapabilityGapSchema,
+  BatchCapabilityStatusSchema,
   BeginScanSchema,
+  CapabilityMatrixSchema,
   CreateAlignmentSchema,
+  CreateCapabilityGapSchema,
+  CreateCapabilityStatusSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateEvidenceSchema,
@@ -55,6 +60,16 @@ export const toolDefinitions = [
     description: '给 feature/map/alignment/entry_point/code_reference 写入一等证据，区分 code_fact、doc_claim、inferred、planned、mock_only、deprecated。'
   },
   {
+    name: 'functree_upsert_capability_status',
+    title: '写入能力实现状态',
+    description: '记录 canonical feature 在某个产品/前端/后端/SDK/运维 map 下的实现状态，例如 prototype、mock、partial、live、deployed。'
+  },
+  {
+    name: 'functree_upsert_capability_gap',
+    title: '写入能力缺口/冲突',
+    description: '结构化记录跨 map 能力缺口或冲突，例如命名冲突、数据模型冲突、Mock 缺口、集成缺口，并附推荐收敛动作。'
+  },
+  {
     name: 'functree_upsert_alignment',
     title: '写入对齐关系',
     description: '按 id、stableKey 或成员集合创建/更新对齐关系，避免重复创建“产品功能 X 对应前端 Y 与后端 Z”一类关系。'
@@ -90,6 +105,16 @@ export const toolDefinitions = [
     description: '在同一项目下批量 upsert 证据，支持 dryRun，并按目标、证据类型、路径、符号、行号和 commit 去重。'
   },
   {
+    name: 'functree_upsert_capability_statuses_batch',
+    title: '批量写入能力实现状态',
+    description: '批量 upsert 能力实现状态矩阵，适合一次同步 product/web/backend/sdk/ops 多个 map 的状态。'
+  },
+  {
+    name: 'functree_upsert_capability_gaps_batch',
+    title: '批量写入能力缺口/冲突',
+    description: '批量 upsert 结构化能力缺口和冲突，支持 dryRun 与逐项错误。'
+  },
+  {
     name: 'functree_query_context',
     title: '查询上下文',
     description: '只读查询 FuncTree 项目、功能地图、功能、入口文件、代码引用和对齐关系，支持 lite 轻量模式、summaryOnly、includeMembers、keyword、types、stableKey、mapId/mapStableKey、path、offset/cursor 与统计摘要。'
@@ -103,6 +128,11 @@ export const toolDefinitions = [
     name: 'functree_project_summary',
     title: '项目摘要',
     description: '只读返回项目级统计、最近扫描、stableKey 冲突和孤儿代码引用数量，供大规模同步后确认。'
+  },
+  {
+    name: 'functree_get_capability_matrix',
+    title: '读取能力状态矩阵',
+    description: '只读返回 canonical feature 跨 product/web/backend/sdk/ops maps 的实现状态、缺口/冲突和关联证据。'
   },
   {
     name: 'functree_get_programming_context',
@@ -173,6 +203,20 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
       }
       return repo.upsertEvidence(input.projectId, input);
     }
+    case 'functree_upsert_capability_status': {
+      const input = CreateCapabilityStatusSchema.parse(args);
+      if (!input.projectId) {
+        throw new ValidationError('projectId 必填。');
+      }
+      return repo.upsertCapabilityStatus(input.projectId, input);
+    }
+    case 'functree_upsert_capability_gap': {
+      const input = CreateCapabilityGapSchema.parse(args);
+      if (!input.projectId) {
+        throw new ValidationError('projectId 必填。');
+      }
+      return repo.upsertCapabilityGap(input.projectId, input);
+    }
     case 'functree_upsert_alignment': {
       const input = CreateAlignmentSchema.parse(args);
       if (!input.projectId) {
@@ -198,6 +242,12 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     case 'functree_upsert_evidence_batch': {
       return repo.upsertEvidenceBatch(BatchEvidenceSchema.parse(args));
     }
+    case 'functree_upsert_capability_statuses_batch': {
+      return repo.upsertCapabilityStatusesBatch(BatchCapabilityStatusSchema.parse(args));
+    }
+    case 'functree_upsert_capability_gaps_batch': {
+      return repo.upsertCapabilityGapsBatch(BatchCapabilityGapSchema.parse(args));
+    }
     case 'functree_query_context': {
       return repo.queryContext(QueryContextSchema.parse(args));
     }
@@ -206,6 +256,9 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     }
     case 'functree_project_summary': {
       return repo.projectSummary(ProjectSummarySchema.parse(args));
+    }
+    case 'functree_get_capability_matrix': {
+      return repo.capabilityMatrix(CapabilityMatrixSchema.parse(args));
     }
     case 'functree_get_programming_context': {
       return repo.programmingContext(ProgrammingContextSchema.parse(args));

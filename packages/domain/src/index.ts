@@ -76,6 +76,10 @@ export const AlignmentRelationSchema = z.enum([
   'stores_data_for',
   'guards_permission_for',
   'mock_represents',
+  'mock_of',
+  'backend_supports',
+  'prototype_intent',
+  'renames_or_aliases',
   'deprecated_by',
   'requires',
   'breaks_if_changed'
@@ -83,7 +87,8 @@ export const AlignmentRelationSchema = z.enum([
 export const AlignmentStatusSchema = z.enum(['proposed', 'confirmed', 'rejected', 'stale']);
 export const AlignmentRoleSchema = z.enum(['source', 'target', 'peer', 'evidence']);
 export const EvidenceTypeSchema = z.enum(['code_fact', 'doc_claim', 'inferred', 'planned', 'mock_only', 'deprecated']);
-export const EvidenceTargetTypeSchema = z.enum(['map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+export const EvidenceSourceTypeSchema = z.enum(['runtime_code', 'test', 'api_route', 'migration_schema', 'product_prototype', 'docs', 'inference']);
+export const EvidenceTargetTypeSchema = z.enum(['map', 'feature', 'alignment', 'entry_point', 'code_reference', 'capability_status', 'capability_gap']);
 export const CodeReferenceRoleInFeatureSchema = z.enum([
   'entry',
   'core_logic',
@@ -101,7 +106,38 @@ export const QueryContextViewSchema = z.enum(['full', 'lite']);
 export const PathMatchModeSchema = z.enum(['contains', 'exact', 'prefix']);
 export const ResolveStableKeyTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
 export const ScanRunStatusSchema = z.enum(['running', 'completed', 'failed', 'cancelled']);
-export const ProgrammingContextIncludeSchema = z.enum(['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality']);
+export const ProgrammingContextIncludeSchema = z.enum(['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality', 'statusMatrix', 'gaps']);
+export const CapabilityImplementationStatusSchema = z.enum([
+  'unknown',
+  'none',
+  'not_needed',
+  'prototype',
+  'spec',
+  'approved',
+  'mock',
+  'partial',
+  'live',
+  'configured',
+  'deployed',
+  'deprecated'
+]);
+export const CapabilityGapTypeSchema = z.enum([
+  'naming_conflict',
+  'data_model_conflict',
+  'entry_conflict',
+  'status_conflict',
+  'permission_conflict',
+  'persistence_conflict',
+  'mock_gap',
+  'implementation_gap',
+  'integration_gap',
+  'behavior_conflict',
+  'alias_conflict',
+  'coverage_gap',
+  'other'
+]);
+export const CapabilityGapSeveritySchema = z.enum(['high', 'medium', 'low']);
+export const CapabilityGapStatusSchema = z.enum(['open', 'accepted', 'resolved', 'ignored']);
 
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export type MapAxis = z.infer<typeof MapAxisSchema>;
@@ -117,6 +153,7 @@ export type AlignmentRelation = z.infer<typeof AlignmentRelationSchema>;
 export type AlignmentStatus = z.infer<typeof AlignmentStatusSchema>;
 export type AlignmentRole = z.infer<typeof AlignmentRoleSchema>;
 export type EvidenceType = z.infer<typeof EvidenceTypeSchema>;
+export type EvidenceSourceType = z.infer<typeof EvidenceSourceTypeSchema>;
 export type EvidenceTargetType = z.infer<typeof EvidenceTargetTypeSchema>;
 export type CodeReferenceRoleInFeature = z.infer<typeof CodeReferenceRoleInFeatureSchema>;
 export type QueryContextType = z.infer<typeof QueryContextTypeSchema>;
@@ -125,6 +162,10 @@ export type PathMatchMode = z.infer<typeof PathMatchModeSchema>;
 export type ResolveStableKeyType = z.infer<typeof ResolveStableKeyTypeSchema>;
 export type ScanRunStatus = z.infer<typeof ScanRunStatusSchema>;
 export type ProgrammingContextInclude = z.infer<typeof ProgrammingContextIncludeSchema>;
+export type CapabilityImplementationStatus = z.infer<typeof CapabilityImplementationStatusSchema>;
+export type CapabilityGapType = z.infer<typeof CapabilityGapTypeSchema>;
+export type CapabilityGapSeverity = z.infer<typeof CapabilityGapSeveritySchema>;
+export type CapabilityGapStatus = z.infer<typeof CapabilityGapStatusSchema>;
 
 const IdSchema = z
   .string()
@@ -139,6 +180,7 @@ const VersionSchema = z.string().trim().min(1).max(80).default('当前');
 const MetadataSchema = z.record(z.string(), z.unknown()).optional().default({});
 const TagsSchema = z.array(z.string().trim().min(1).max(60)).max(40).optional().default([]);
 const DetailListSchema = z.array(z.string().trim().min(1).max(800)).max(80).optional().default([]);
+const EvidenceIdsSchema = z.array(IdSchema).max(100).optional().default([]);
 const BooleanQuerySchema = z.preprocess((value) => {
   if (typeof value !== 'string') return value;
   const normalized = value.trim().toLowerCase();
@@ -322,6 +364,8 @@ const CreateEvidenceBaseSchema = z.object({
   lineEnd: z.number().int().min(1).max(1000000).nullable().optional().default(null),
   summary: OptionalTextSchema,
   confidence: z.number().min(0).max(1).optional().default(1),
+  sourceType: EvidenceSourceTypeSchema.optional().default('runtime_code'),
+  sourcePriority: z.number().int().min(1).max(100).optional().default(80),
   commitSha: CommitShaSchema.optional(),
   verifiedAt: z.string().trim().max(80).optional().default(''),
   metadata: MetadataSchema,
@@ -331,6 +375,63 @@ const CreateEvidenceBaseSchema = z.object({
 export const CreateEvidenceSchema = CreateEvidenceBaseSchema.refine((input) => Boolean(input.targetId || input.targetStableKey), {
   message: 'evidence 需要 targetId 或 targetStableKey。',
   path: ['targetId']
+});
+
+const CapabilityTargetReferenceSchema = z.object({
+  projectId: IdSchema.optional(),
+  canonicalFeatureId: IdSchema.optional(),
+  canonicalFeatureStableKey: StableKeySchema.optional(),
+  canonicalMapId: IdSchema.optional(),
+  canonicalMapStableKey: StableKeySchema.optional(),
+  canonicalFeatureVersion: z.string().trim().min(1).max(80).optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional()
+});
+
+const CapabilityTargetRefinement = (input: z.infer<typeof CapabilityTargetReferenceSchema>) =>
+  Boolean(input.canonicalFeatureId || input.canonicalFeatureStableKey);
+
+const CreateCapabilityStatusBaseSchema = CapabilityTargetReferenceSchema.extend({
+  id: IdSchema.optional(),
+  status: CapabilityImplementationStatusSchema.default('unknown'),
+  summary: OptionalTextSchema,
+  gaps: DetailListSchema,
+  recommendedAction: OptionalTextSchema,
+  evidenceIds: EvidenceIdsSchema,
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
+});
+
+export const CreateCapabilityStatusSchema = CreateCapabilityStatusBaseSchema.refine(CapabilityTargetRefinement, {
+  message: '能力状态需要 canonicalFeatureId 或 canonicalFeatureStableKey。',
+  path: ['canonicalFeatureId']
+}).refine((input) => Boolean(input.mapId || input.mapStableKey), {
+  message: '能力状态需要 mapId 或 mapStableKey，用来表达哪个 map 的实现状态。',
+  path: ['mapId']
+});
+
+const CreateCapabilityGapBaseSchema = CapabilityTargetReferenceSchema.extend({
+  id: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
+  title: TextSchema,
+  gapType: CapabilityGapTypeSchema,
+  severity: CapabilityGapSeveritySchema.default('medium'),
+  status: CapabilityGapStatusSchema.default('open'),
+  description: OptionalTextSchema,
+  evidenceIds: EvidenceIdsSchema,
+  recommendedAction: OptionalTextSchema,
+  ownerMapId: IdSchema.optional(),
+  ownerMapStableKey: StableKeySchema.optional(),
+  metadata: MetadataSchema,
+  dryRun: DryRunSchema
+});
+
+export const CreateCapabilityGapSchema = CreateCapabilityGapBaseSchema.refine(CapabilityTargetRefinement, {
+  message: '缺口/冲突需要 canonicalFeatureId 或 canonicalFeatureStableKey。',
+  path: ['canonicalFeatureId']
 });
 
 export const QueryContextSchema = z.object({
@@ -411,6 +512,18 @@ export const BatchEvidenceSchema = z.object({
   items: z.array(CreateEvidenceBaseSchema.omit({ projectId: true, dryRun: true })).min(1).max(500)
 });
 
+export const BatchCapabilityStatusSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateCapabilityStatusBaseSchema.omit({ projectId: true, dryRun: true })).min(1).max(500)
+});
+
+export const BatchCapabilityGapSchema = z.object({
+  projectId: IdSchema,
+  dryRun: DryRunSchema,
+  items: z.array(CreateCapabilityGapBaseSchema.omit({ projectId: true, dryRun: true })).min(1).max(500)
+});
+
 export const ResolveStableKeyItemSchema = z.object({
   type: ResolveStableKeyTypeSchema,
   id: IdSchema.optional(),
@@ -435,6 +548,19 @@ export const ProjectSummarySchema = z.object({
   projectId: IdSchema
 });
 
+export const CapabilityMatrixSchema = z.object({
+  projectId: IdSchema,
+  canonicalFeatureId: IdSchema.optional(),
+  canonicalFeatureStableKey: StableKeySchema.optional(),
+  canonicalMapId: IdSchema.optional(),
+  canonicalMapStableKey: StableKeySchema.optional(),
+  canonicalFeatureVersion: z.string().trim().min(1).max(80).optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  includeGaps: BooleanQuerySchema.optional().default(true),
+  includeEvidence: BooleanQuerySchema.optional().default(true)
+});
+
 export const ProgrammingContextSchema = z.object({
   projectId: IdSchema,
   featureId: IdSchema.optional(),
@@ -443,7 +569,7 @@ export const ProgrammingContextSchema = z.object({
   mapStableKey: StableKeySchema.optional(),
   featureVersion: z.string().trim().min(1).max(80).optional(),
   depth: z.number().int().min(0).max(3).optional().default(1),
-  include: z.array(ProgrammingContextIncludeSchema).min(1).max(8).optional().default([
+  include: z.array(ProgrammingContextIncludeSchema).min(1).max(10).optional().default([
     'entryPoints',
     'codeReferences',
     'alignments',
@@ -451,7 +577,9 @@ export const ProgrammingContextSchema = z.object({
     'acceptanceCriteria',
     'evidence',
     'details',
-    'quality'
+    'quality',
+    'statusMatrix',
+    'gaps'
   ])
 }).refine((input) => Boolean(input.featureId || input.featureStableKey), {
   message: 'programming context 需要 featureId 或 featureStableKey。',
@@ -498,6 +626,8 @@ export type CreateEntryPointInput = z.input<typeof CreateEntryPointSchema>;
 export type CreateCodeReferenceInput = z.input<typeof CreateCodeReferenceSchema>;
 export type CreateAlignmentInput = z.input<typeof CreateAlignmentSchema>;
 export type CreateEvidenceInput = z.input<typeof CreateEvidenceSchema>;
+export type CreateCapabilityStatusInput = z.input<typeof CreateCapabilityStatusSchema>;
+export type CreateCapabilityGapInput = z.input<typeof CreateCapabilityGapSchema>;
 export type QueryContextInput = z.input<typeof QueryContextSchema>;
 export type BatchMapInput = z.input<typeof BatchMapSchema>;
 export type BatchFeatureInput = z.input<typeof BatchFeatureSchema>;
@@ -505,8 +635,11 @@ export type BatchEntryPointInput = z.input<typeof BatchEntryPointSchema>;
 export type BatchCodeReferenceInput = z.input<typeof BatchCodeReferenceSchema>;
 export type BatchAlignmentInput = z.input<typeof BatchAlignmentSchema>;
 export type BatchEvidenceInput = z.input<typeof BatchEvidenceSchema>;
+export type BatchCapabilityStatusInput = z.input<typeof BatchCapabilityStatusSchema>;
+export type BatchCapabilityGapInput = z.input<typeof BatchCapabilityGapSchema>;
 export type ResolveStableKeysInput = z.input<typeof ResolveStableKeysSchema>;
 export type ProjectSummaryInput = z.input<typeof ProjectSummarySchema>;
+export type CapabilityMatrixInput = z.input<typeof CapabilityMatrixSchema>;
 export type ProgrammingContextInput = z.input<typeof ProgrammingContextSchema>;
 export type QualityReportInput = z.input<typeof QualityReportSchema>;
 export type QueryPathContextInput = z.input<typeof QueryPathContextSchema>;
@@ -617,6 +750,10 @@ export const labels = {
     stores_data_for: '存储数据',
     guards_permission_for: '权限保护',
     mock_represents: 'Mock 表示',
+    mock_of: '是 Mock',
+    backend_supports: '后端支撑',
+    prototype_intent: '原型意图',
+    renames_or_aliases: '别名/重命名',
     deprecated_by: '被替代',
     requires: '需要',
     breaks_if_changed: '变更会破坏'
@@ -635,6 +772,15 @@ export const labels = {
     mock_only: '仅 Mock',
     deprecated: '废弃'
   } satisfies Record<EvidenceType, string>,
+  evidenceSourceType: {
+    runtime_code: '运行代码',
+    test: '测试',
+    api_route: 'API 路由',
+    migration_schema: '迁移/Schema',
+    product_prototype: '产品原型',
+    docs: '文档',
+    inference: '推断'
+  } satisfies Record<EvidenceSourceType, string>,
   codeReferenceRoleInFeature: {
     entry: '入口',
     core_logic: '核心逻辑',
@@ -646,7 +792,47 @@ export const labels = {
     contract: '契约',
     adapter: '适配',
     other: '其他'
-  } satisfies Record<CodeReferenceRoleInFeature, string>
+  } satisfies Record<CodeReferenceRoleInFeature, string>,
+  capabilityImplementationStatus: {
+    unknown: '未知',
+    none: '无实现',
+    not_needed: '不需要',
+    prototype: '原型',
+    spec: '规格',
+    approved: '已确认',
+    mock: 'Mock',
+    partial: '部分实现',
+    live: '真实可用',
+    configured: '已配置',
+    deployed: '已部署',
+    deprecated: '已废弃'
+  } satisfies Record<CapabilityImplementationStatus, string>,
+  capabilityGapType: {
+    naming_conflict: '命名冲突',
+    data_model_conflict: '数据模型冲突',
+    entry_conflict: '入口冲突',
+    status_conflict: '状态冲突',
+    permission_conflict: '权限冲突',
+    persistence_conflict: '持久化冲突',
+    mock_gap: 'Mock 缺口',
+    implementation_gap: '实现缺口',
+    integration_gap: '集成缺口',
+    behavior_conflict: '行为冲突',
+    alias_conflict: '别名冲突',
+    coverage_gap: '覆盖缺口',
+    other: '其他'
+  } satisfies Record<CapabilityGapType, string>,
+  capabilityGapSeverity: {
+    high: '高',
+    medium: '中',
+    low: '低'
+  } satisfies Record<CapabilityGapSeverity, string>,
+  capabilityGapStatus: {
+    open: '未解决',
+    accepted: '已接受',
+    resolved: '已解决',
+    ignored: '已忽略'
+  } satisfies Record<CapabilityGapStatus, string>
 };
 
 export function newId(prefix: string): string {

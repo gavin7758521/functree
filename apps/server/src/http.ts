@@ -1,6 +1,9 @@
 import {
   BeginScanSchema,
+  CapabilityMatrixSchema,
   CreateAlignmentSchema,
+  CreateCapabilityGapSchema,
+  CreateCapabilityStatusSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateEvidenceSchema,
@@ -127,6 +130,18 @@ export function createHttpServer(db: Db): FastifyInstance {
   app.post('/api/projects/:projectId/evidence', async (request) => {
     const input = CreateEvidenceSchema.parse(request.body);
     return repo.upsertEvidence(params(request).projectId, input);
+  });
+
+  app.get('/api/projects/:projectId/capability-matrix', async (request) =>
+    repo.capabilityMatrix(CapabilityMatrixSchema.parse({ ...(request.query as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/capability-statuses', async (request) => {
+    const input = CreateCapabilityStatusSchema.parse(request.body);
+    return repo.upsertCapabilityStatus(params(request).projectId, input);
+  });
+  app.post('/api/projects/:projectId/capability-gaps', async (request) => {
+    const input = CreateCapabilityGapSchema.parse(request.body);
+    return repo.upsertCapabilityGap(params(request).projectId, input);
   });
 
   app.get('/api/projects/:projectId/alignments', async (request) => repo.listAlignments(params(request).projectId));

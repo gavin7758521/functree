@@ -57,6 +57,12 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_evidence]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_capability_status]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_capability_gap]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
@@ -75,6 +81,12 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_evidence_batch]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_upsert_capability_statuses_batch]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_capability_gaps_batch]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignments_batch]
 approval_mode = "approve"
 
@@ -85,7 +97,7 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-`functree_query_context`, `functree_resolve_stable_keys`, `functree_project_summary`, `functree_get_programming_context`, `functree_quality_report`, and `functree_query_path_context` are read-only.
+`functree_query_context`, `functree_resolve_stable_keys`, `functree_project_summary`, `functree_get_capability_matrix`, `functree_get_programming_context`, `functree_quality_report`, and `functree_query_path_context` are read-only.
 
 ## Tools
 
@@ -94,18 +106,23 @@ approval_mode = "approve"
 - `functree_upsert_feature`: create or update a feature under a map by `id` or `stableKey` + `version`; accepts `mapId` or `projectId + mapStableKey`; supports structured `details` for intent, current/expected behavior, scope, gaps, acceptance criteria, risks, and verification commit.
 - `functree_upsert_entry_point`: create or update an analysis entry point; accepts `mapStableKey` and `scanRunId`.
 - `functree_upsert_code_reference`: create or update a code reference by `id`, `stableKey`, or path signature; accepts `mapStableKey`, `featureStableKey`, `entryPointStableKey`, `scanRunId`, `roleInFeature`, `changeGuidance`, `verificationHint`, and `blastRadius`.
-- `functree_upsert_evidence`: create or update evidence for a map, feature, alignment, entry point, or code reference; distinguishes `code_fact`, `doc_claim`, `inferred`, `planned`, `mock_only`, and `deprecated`.
+- `functree_upsert_evidence`: create or update evidence for a map, feature, alignment, entry point, code reference, capability status, or capability gap; distinguishes `code_fact`, `doc_claim`, `inferred`, `planned`, `mock_only`, and `deprecated`, with source type and source priority.
+- `functree_upsert_capability_status`: create or update one status matrix cell for a canonical feature in a map, such as `prototype`, `mock`, `partial`, `live`, `configured`, or `deployed`.
+- `functree_upsert_capability_gap`: create or update a structured capability gap/conflict with type, severity, evidence IDs, owner map, and recommended action.
 - `functree_upsert_alignment`: create or update a cross-layer alignment relation by `id`, `stableKey`, or member set. Members can use `targetId` or stable keys.
 - `functree_upsert_maps_batch`: batch upsert maps with `dryRun` and per-item errors.
 - `functree_upsert_features_batch`: batch upsert features across one or more maps with `dryRun` and rollback on write failure.
 - `functree_upsert_entry_points_batch`: batch upsert entry points.
 - `functree_upsert_code_references_batch`: batch upsert code references.
 - `functree_upsert_evidence_batch`: batch upsert evidence with `dryRun`, per-item errors, and summary counts.
+- `functree_upsert_capability_statuses_batch`: batch upsert capability status matrix cells.
+- `functree_upsert_capability_gaps_batch`: batch upsert capability gaps/conflicts.
 - `functree_upsert_alignments_batch`: batch upsert alignments with member-set de-duplication.
 - `functree_query_context`: read project, map, feature, entry point, code reference, evidence, and alignment context with filters, `view: "lite"`, `includeDetails`, summary-only mode, and cursor pagination.
 - `functree_resolve_stable_keys`: resolve stable keys to concrete IDs in bulk.
 - `functree_project_summary`: read project counts, latest scan, conflicts, and orphan reference counts.
-- `functree_get_programming_context`: read the prioritized context for changing one feature: entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, and quality issues.
+- `functree_get_capability_matrix`: read a canonical feature status matrix across product/web/backend/sdk/ops maps, including gaps and supporting evidence.
+- `functree_get_programming_context`: read the prioritized context for changing one feature: entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, capability matrix, gaps, and quality issues.
 - `functree_quality_report`: read project-level coverage gaps such as missing code references, missing alignments, missing `code_fact` evidence, thin draft/in-progress details, mock boundaries, and stale paths.
 - `functree_query_path_context`: read existing entry points/code references and related objects for a path.
 - `functree_begin_scan`: record the start of a Git commit scan.

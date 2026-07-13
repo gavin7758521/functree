@@ -40,15 +40,15 @@ const views: ViewMeta[] = [
 const mcpToolGroups = [
   {
     name: '查询',
-    tools: ['functree_query_context', 'functree_resolve_stable_keys', 'functree_project_summary', 'functree_get_programming_context', 'functree_quality_report', 'functree_query_path_context']
+    tools: ['functree_query_context', 'functree_resolve_stable_keys', 'functree_project_summary', 'functree_get_capability_matrix', 'functree_get_programming_context', 'functree_quality_report', 'functree_query_path_context']
   },
   {
     name: '写入',
-    tools: ['functree_create_project', 'functree_upsert_map', 'functree_upsert_feature', 'functree_upsert_entry_point', 'functree_upsert_code_reference', 'functree_upsert_evidence', 'functree_upsert_alignment']
+    tools: ['functree_create_project', 'functree_upsert_map', 'functree_upsert_feature', 'functree_upsert_entry_point', 'functree_upsert_code_reference', 'functree_upsert_evidence', 'functree_upsert_capability_status', 'functree_upsert_capability_gap', 'functree_upsert_alignment']
   },
   {
     name: '批量',
-    tools: ['functree_upsert_maps_batch', 'functree_upsert_features_batch', 'functree_upsert_entry_points_batch', 'functree_upsert_code_references_batch', 'functree_upsert_evidence_batch', 'functree_upsert_alignments_batch']
+    tools: ['functree_upsert_maps_batch', 'functree_upsert_features_batch', 'functree_upsert_entry_points_batch', 'functree_upsert_code_references_batch', 'functree_upsert_evidence_batch', 'functree_upsert_capability_statuses_batch', 'functree_upsert_capability_gaps_batch', 'functree_upsert_alignments_batch']
   },
   {
     name: '扫描',

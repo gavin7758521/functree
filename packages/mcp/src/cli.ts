@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:4174';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const QUERY_CONTEXT_MAX_LIMIT = 200;
@@ -36,6 +36,10 @@ const alignmentRelations = [
   'stores_data_for',
   'guards_permission_for',
   'mock_represents',
+  'mock_of',
+  'backend_supports',
+  'prototype_intent',
+  'renames_or_aliases',
   'deprecated_by',
   'requires',
   'breaks_if_changed'
@@ -43,14 +47,33 @@ const alignmentRelations = [
 const alignmentStatuses = ['proposed', 'confirmed', 'rejected', 'stale'] as const;
 const alignmentRoles = ['source', 'target', 'peer', 'evidence'] as const;
 const evidenceTypes = ['code_fact', 'doc_claim', 'inferred', 'planned', 'mock_only', 'deprecated'] as const;
-const evidenceTargetTypes = ['map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
+const evidenceSourceTypes = ['runtime_code', 'test', 'api_route', 'migration_schema', 'product_prototype', 'docs', 'inference'] as const;
+const evidenceTargetTypes = ['map', 'feature', 'alignment', 'entry_point', 'code_reference', 'capability_status', 'capability_gap'] as const;
 const codeReferenceRoles = ['entry', 'core_logic', 'permission_check', 'storage', 'rendering', 'configuration', 'test', 'contract', 'adapter', 'other'] as const;
 const queryContextTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence'] as const;
 const queryContextViews = ['full', 'lite'] as const;
 const pathMatchModes = ['contains', 'exact', 'prefix'] as const;
 const resolveStableKeyTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
 const scanRunStatuses = ['completed', 'failed', 'cancelled'] as const;
-const programmingContextIncludes = ['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality'] as const;
+const programmingContextIncludes = ['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality', 'statusMatrix', 'gaps'] as const;
+const capabilityStatuses = ['unknown', 'none', 'not_needed', 'prototype', 'spec', 'approved', 'mock', 'partial', 'live', 'configured', 'deployed', 'deprecated'] as const;
+const capabilityGapTypes = [
+  'naming_conflict',
+  'data_model_conflict',
+  'entry_conflict',
+  'status_conflict',
+  'permission_conflict',
+  'persistence_conflict',
+  'mock_gap',
+  'implementation_gap',
+  'integration_gap',
+  'behavior_conflict',
+  'alias_conflict',
+  'coverage_gap',
+  'other'
+] as const;
+const capabilityGapSeverities = ['high', 'medium', 'low'] as const;
+const capabilityGapStatuses = ['open', 'accepted', 'resolved', 'ignored'] as const;
 
 type Config = {
   serverUrl: string;
@@ -197,8 +220,50 @@ const evidenceItemShape = {
   lineEnd: z.number().int().min(1).max(1000000).nullable().optional().describe('Optional 1-based source line end.'),
   summary: z.string().optional().describe('Short evidence summary.'),
   confidence: z.number().min(0).max(1).optional().describe('Confidence from 0 to 1. Defaults to 1.'),
+  sourceType: z.enum(evidenceSourceTypes).optional().describe('Evidence source. Priority order is runtime_code > test > API route/schema > product_prototype > docs > inference.'),
+  sourcePriority: z.number().int().min(1).max(100).optional().describe('Explicit source priority. Higher is stronger. Defaults to 80.'),
   commitSha: z.string().optional().describe('Git commit SHA where this evidence was verified.'),
   verifiedAt: z.string().optional().describe('Verification timestamp or date.'),
+  metadata: metadataSchema
+};
+
+const capabilityReferenceShape = {
+  canonicalFeatureId: z.string().optional().describe('Canonical capability feature ID, usually a product/capability feature.'),
+  canonicalFeatureStableKey: z.string().optional().describe('Canonical capability feature stableKey. Use canonicalMapStableKey/mapId if ambiguous.'),
+  canonicalMapId: z.string().optional().describe('Optional canonical map ID for resolving canonicalFeatureStableKey.'),
+  canonicalMapStableKey: z.string().optional().describe('Optional canonical map stableKey, for example product.ai-assistant.'),
+  canonicalFeatureVersion: z.string().optional().describe('Optional canonical feature version.'),
+  mapId: z.string().optional().describe('Map whose implementation status/gap is being described.'),
+  mapStableKey: z.string().optional().describe('Map stableKey whose implementation status/gap is being described.'),
+  featureId: z.string().optional().describe('Optional concrete feature in that map.'),
+  featureStableKey: z.string().optional().describe('Optional concrete feature stableKey in that map.'),
+  featureVersion: z.string().optional().describe('Optional concrete feature version.')
+};
+
+const capabilityStatusItemShape = {
+  id: z.string().optional().describe('Optional capability status ID. If omitted, FuncTree generates one.'),
+  ...capabilityReferenceShape,
+  status: z.enum(capabilityStatuses).optional().describe('Implementation status for this map: prototype/spec/approved/mock/partial/live/configured/deployed/none/not_needed/etc.'),
+  summary: z.string().optional().describe('Short status summary, for example "mock only" or "live backend API".'),
+  gaps: z.array(z.string()).max(80).optional().describe('Known gaps for this map implementation.'),
+  recommendedAction: z.string().optional().describe('Recommended next action for this map status.'),
+  evidenceIds: z.array(z.string()).max(100).optional().describe('Evidence IDs supporting this status.'),
+  metadata: metadataSchema
+};
+
+const capabilityGapItemShape = {
+  id: z.string().optional().describe('Optional gap/conflict ID. If omitted, FuncTree generates one.'),
+  stableKey: z.string().optional().describe('Optional stable semantic key for this gap/conflict.'),
+  ...capabilityReferenceShape,
+  title: z.string().describe('Short gap/conflict title.'),
+  gapType: z.enum(capabilityGapTypes).describe('Gap/conflict type such as naming_conflict, mock_gap, integration_gap, data_model_conflict, permission_conflict, or implementation_gap.'),
+  severity: z.enum(capabilityGapSeverities).optional().describe('Gap severity. Defaults to medium.'),
+  status: z.enum(capabilityGapStatuses).optional().describe('Gap status. Defaults to open.'),
+  description: z.string().optional().describe('Detailed explanation of the gap/conflict.'),
+  evidenceIds: z.array(z.string()).max(100).optional().describe('Evidence IDs supporting this gap/conflict.'),
+  recommendedAction: z.string().optional().describe('Concrete next step to resolve or accept this gap.'),
+  ownerMapId: z.string().optional().describe('Optional owning map ID for follow-up.'),
+  ownerMapStableKey: z.string().optional().describe('Optional owning map stableKey for follow-up.'),
   metadata: metadataSchema
 };
 
@@ -219,7 +284,10 @@ const server = new McpServer(
       'Code references connect features and maps to concrete files, symbols, routes, tables, migrations, configs, tests, or documents.',
       'Use feature details for unfinished or uncertain work: intent, currentBehavior, expectedBehavior, scope, knownGaps, openQuestions, acceptanceCriteria, risks, and detailsMarkdown.',
       'Use evidence to separate running-code facts from documentation claims, inference, plans, mock-only behavior, and deprecated behavior. Never treat mock_only or planned evidence as real backend capability.',
+      'Use capability status matrix records to say whether a canonical feature is prototype, mock, partial, live, configured, deployed, none, or not_needed in each product/web/backend/sdk/ops map.',
+      'Use capability gap records for same-name-different-meaning, same-capability-multiple-implementations, mock-vs-live gaps, data model conflicts, permission conflicts, and recommended convergence actions.',
       'Use functree_get_programming_context when preparing to change a feature; it returns prioritized entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, and quality issues.',
+      'Use functree_get_capability_matrix when the user asks whether a capability is real, mock, partial, backed by backend APIs, or has unresolved cross-layer gaps.',
       'Use functree_quality_report after syncs to find missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress details, mock boundaries, and stale paths.',
       'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not store business data.',
       'Use functree_query_context before writing when IDs, stableKeys, existing maps, features, entry points, code references, or alignments are uncertain.',
@@ -365,6 +433,48 @@ server.registerTool(
     }
   },
   async (args) => textResult(await callHttpTool(config, 'functree_upsert_evidence', args))
+);
+
+server.registerTool(
+  'functree_upsert_capability_status',
+  {
+    title: 'Create or update capability implementation status',
+    description:
+      'Create or update one status matrix cell for a canonical feature in a product/web/backend/sdk/ops map. Use this to distinguish prototype, mock, partial, live, deployed, none, and not_needed.',
+    inputSchema: {
+      ...capabilityStatusItemShape,
+      projectId: z.string().describe('ID of the project that owns this capability status.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_capability_status', args))
+);
+
+server.registerTool(
+  'functree_upsert_capability_gap',
+  {
+    title: 'Create or update capability gap/conflict',
+    description:
+      'Create or update a structured gap/conflict for a canonical feature, such as mock_gap, implementation_gap, naming_conflict, data_model_conflict, permission_conflict, or integration_gap.',
+    inputSchema: {
+      ...capabilityGapItemShape,
+      projectId: z.string().describe('ID of the project that owns this capability gap.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_capability_gap', args))
 );
 
 server.registerTool(
@@ -517,6 +627,48 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_upsert_capability_statuses_batch',
+  {
+    title: 'Batch upsert capability implementation statuses',
+    description:
+      'Batch upsert status matrix cells for canonical capabilities across product/web/backend/sdk/ops maps. Supports dryRun and per-item errors.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all capability statuses in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(capabilityStatusItemShape)).min(1).max(500).describe('Capability implementation statuses to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_capability_statuses_batch', args))
+);
+
+server.registerTool(
+  'functree_upsert_capability_gaps_batch',
+  {
+    title: 'Batch upsert capability gaps/conflicts',
+    description:
+      'Batch upsert structured capability gaps and conflicts. Use for same-name-different-meaning, mock-vs-live, product-vs-backend, and data model conflicts.',
+    inputSchema: {
+      projectId: z.string().describe('ID of the project that owns all capability gaps in this batch.'),
+      dryRun: dryRunSchema,
+      items: z.array(z.object(capabilityGapItemShape)).min(1).max(500).describe('Capability gaps/conflicts to upsert.')
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_capability_gaps_batch', args))
+);
+
+server.registerTool(
   'functree_query_context',
   {
     title: 'Query FuncTree context',
@@ -603,6 +755,34 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_get_capability_matrix',
+  {
+    title: 'Get capability status matrix',
+    description:
+      'Return a canonical feature status matrix across product/web/backend/sdk/ops maps, including implementation statuses, structured gaps/conflicts, and supporting evidence.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      canonicalFeatureId: z.string().optional().describe('Canonical feature ID. Optional when canonicalFeatureStableKey is provided.'),
+      canonicalFeatureStableKey: z.string().optional().describe('Canonical feature stableKey. Use canonicalMapStableKey/mapId if ambiguous.'),
+      canonicalMapId: z.string().optional().describe('Optional canonical map ID.'),
+      canonicalMapStableKey: z.string().optional().describe('Optional canonical map stableKey.'),
+      canonicalFeatureVersion: z.string().optional().describe('Optional canonical feature version.'),
+      mapId: z.string().optional().describe('Optional map filter.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey filter.'),
+      includeGaps: z.boolean().optional().describe('Include gap/conflict records. Defaults to true.'),
+      includeEvidence: z.boolean().optional().describe('Include evidence referenced by statuses and gaps. Defaults to true.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_get_capability_matrix', args))
+);
+
+server.registerTool(
   'functree_get_programming_context',
   {
     title: 'Get programming context for a feature',
@@ -616,7 +796,7 @@ server.registerTool(
       mapStableKey: z.string().optional().describe('Optional map stableKey for featureStableKey disambiguation.'),
       featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
       depth: z.number().int().min(0).max(3).optional().describe('How far to include parent/child/aligned features. Defaults to 1.'),
-      include: z.array(z.enum(programmingContextIncludes)).min(1).max(8).optional().describe('Context sections to include. Defaults to all sections.')
+      include: z.array(z.enum(programmingContextIncludes)).min(1).max(10).optional().describe('Context sections to include. Defaults to all sections.')
     },
     annotations: {
       readOnlyHint: true,

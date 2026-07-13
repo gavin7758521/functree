@@ -147,8 +147,50 @@ function migrate(db: Db): void {
       line_end INTEGER,
       summary TEXT NOT NULL DEFAULT '',
       confidence REAL NOT NULL DEFAULT 1,
+      source_type TEXT NOT NULL DEFAULT 'runtime_code',
+      source_priority INTEGER NOT NULL DEFAULT 80,
       commit_sha TEXT NOT NULL DEFAULT '',
       verified_at TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, signature)
+    );
+
+    CREATE TABLE IF NOT EXISTS capability_statuses (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      canonical_feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+      map_id TEXT NOT NULL REFERENCES maps(id) ON DELETE CASCADE,
+      feature_id TEXT REFERENCES features(id) ON DELETE SET NULL,
+      signature TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      gaps_json TEXT NOT NULL DEFAULT '[]',
+      recommended_action TEXT NOT NULL DEFAULT '',
+      evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, signature)
+    );
+
+    CREATE TABLE IF NOT EXISTS capability_gaps (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      stable_key TEXT NOT NULL DEFAULT '',
+      signature TEXT NOT NULL,
+      canonical_feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+      map_id TEXT REFERENCES maps(id) ON DELETE SET NULL,
+      feature_id TEXT REFERENCES features(id) ON DELETE SET NULL,
+      gap_type TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      status TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+      recommended_action TEXT NOT NULL DEFAULT '',
+      owner_map_id TEXT REFERENCES maps(id) ON DELETE SET NULL,
       metadata_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -222,6 +264,18 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_evidence_project ON evidence(project_id);
     CREATE INDEX IF NOT EXISTS idx_evidence_target ON evidence(target_type, target_id);
     CREATE INDEX IF NOT EXISTS idx_evidence_type ON evidence(evidence_type);
+    CREATE INDEX IF NOT EXISTS idx_capability_statuses_project ON capability_statuses(project_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_statuses_canonical ON capability_statuses(canonical_feature_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_statuses_map ON capability_statuses(map_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_statuses_feature ON capability_statuses(feature_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_gaps_project ON capability_gaps(project_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_gaps_canonical ON capability_gaps(canonical_feature_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_gaps_map ON capability_gaps(map_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_gaps_feature ON capability_gaps(feature_id);
+    CREATE INDEX IF NOT EXISTS idx_capability_gaps_status ON capability_gaps(status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_gaps_project_stable_key
+      ON capability_gaps(project_id, stable_key)
+      WHERE stable_key <> '';
     CREATE INDEX IF NOT EXISTS idx_scan_runs_project ON scan_runs(project_id);
     CREATE INDEX IF NOT EXISTS idx_scan_runs_repo_commit ON scan_runs(project_id, repo_key, branch, commit_sha);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_code_references_project_stable_key
@@ -250,10 +304,13 @@ function migrate(db: Db): void {
   ensureColumn(db, 'code_references', 'change_guidance', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'code_references', 'verification_hint', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'code_references', 'blast_radius', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'evidence', 'source_type', "TEXT NOT NULL DEFAULT 'runtime_code'");
+  ensureColumn(db, 'evidence', 'source_priority', 'INTEGER NOT NULL DEFAULT 80');
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_entry_points_last_seen_scan ON entry_points(last_seen_scan_run_id);
     CREATE INDEX IF NOT EXISTS idx_code_references_last_seen_scan ON code_references(last_seen_scan_run_id);
+    CREATE INDEX IF NOT EXISTS idx_evidence_source_type ON evidence(source_type);
   `);
 }
 

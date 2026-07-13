@@ -10,6 +10,11 @@ export type Catalog = {
     codeReferenceKind: Record<string, string>;
     codeReferenceRoleInFeature: Record<string, string>;
     evidenceType: Record<string, string>;
+    evidenceSourceType: Record<string, string>;
+    capabilityImplementationStatus: Record<string, string>;
+    capabilityGapType: Record<string, string>;
+    capabilityGapSeverity: Record<string, string>;
+    capabilityGapStatus: Record<string, string>;
     alignmentRelation: Record<string, string>;
     alignmentStatus: Record<string, string>;
   };

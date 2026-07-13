@@ -5,8 +5,13 @@ import {
   type BatchFeatureInput,
   type BatchMapInput,
   type BatchEvidenceInput,
+  type BatchCapabilityGapInput,
+  type BatchCapabilityStatusInput,
   type BeginScanInput,
   type CreateAlignmentInput,
+  type CapabilityMatrixInput,
+  type CreateCapabilityGapInput,
+  type CreateCapabilityStatusInput,
   type CreateCodeReferenceInput,
   type CreateEntryPointInput,
   type CreateEvidenceInput,
@@ -29,6 +34,11 @@ import {
   BatchFeatureSchema,
   BatchMapSchema,
   BatchEvidenceSchema,
+  BatchCapabilityGapSchema,
+  BatchCapabilityStatusSchema,
+  CapabilityMatrixSchema,
+  CreateCapabilityGapSchema,
+  CreateCapabilityStatusSchema,
   CreateAlignmentSchema,
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
@@ -220,12 +230,59 @@ export type EvidenceRow = {
   lineEnd: number | null;
   summary: string;
   confidence: number;
+  sourceType: string;
+  sourcePriority: number;
   commitSha: string;
   verifiedAt: string;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   label?: string;
+};
+
+export type CapabilityStatusRow = {
+  id: string;
+  projectId: string;
+  canonicalFeatureId: string;
+  mapId: string;
+  featureId: string | null;
+  signature: string;
+  status: string;
+  summary: string;
+  gaps: string[];
+  recommendedAction: string;
+  evidenceIds: string[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  canonicalFeature?: FeatureRow;
+  map?: FeatureMapRow;
+  feature?: FeatureRow | null;
+};
+
+export type CapabilityGapRow = {
+  id: string;
+  projectId: string;
+  stableKey: string;
+  signature: string;
+  canonicalFeatureId: string;
+  mapId: string | null;
+  featureId: string | null;
+  gapType: string;
+  severity: 'high' | 'medium' | 'low';
+  status: string;
+  title: string;
+  description: string;
+  evidenceIds: string[];
+  recommendedAction: string;
+  ownerMapId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  canonicalFeature?: FeatureRow;
+  map?: FeatureMapRow | null;
+  feature?: FeatureRow | null;
+  ownerMap?: FeatureMapRow | null;
 };
 
 export type UpsertOperation = 'created' | 'updated' | 'unchanged' | 'dry_run';
@@ -342,10 +399,25 @@ export type ProgrammingContextResult = {
   alignments: AlignmentRow[];
   impactedFeatures: FeatureRow[];
   evidence: EvidenceRow[];
+  capabilityMatrix: CapabilityMatrixResult | null;
+  capabilityGaps: CapabilityGapRow[];
   risks: string[];
   acceptanceCriteria: string[];
   verification: string[];
   qualityIssues: QualityIssue[];
+};
+
+export type CapabilityMatrixResult = {
+  project: ProjectRow;
+  canonicalFeature: FeatureRow | null;
+  statuses: CapabilityStatusRow[];
+  gaps: CapabilityGapRow[];
+  evidence: EvidenceRow[];
+  summary: {
+    statusCounts: Record<string, number>;
+    openGapCount: number;
+    highSeverityGapCount: number;
+  };
 };
 
 export type QualityIssue = {
@@ -371,6 +443,8 @@ export type QualityReportResult = {
     blockedDetailGaps: number;
     deprecatedDetailGaps: number;
     mockBoundaryGaps: number;
+    openCapabilityGaps: number;
+    highSeverityCapabilityGaps: number;
     missingPaths: number;
   };
   issues: QualityIssue[];
@@ -1117,6 +1191,8 @@ export class FuncTreeRepository {
       lineEnd: data.lineEnd,
       summary: data.summary,
       confidence: data.confidence,
+      sourceType: data.sourceType,
+      sourcePriority: data.sourcePriority,
       commitSha: data.commitSha ?? '',
       verifiedAt: data.verifiedAt,
       metadata: data.metadata,
@@ -1125,7 +1201,7 @@ export class FuncTreeRepository {
       label: this.alignableLabel(data.targetType, targetId)
     } satisfies EvidenceRow;
     const changedFields = existing
-      ? changedFieldsFor(existing, planned, ['targetType', 'targetId', 'evidenceType', 'path', 'symbol', 'lineStart', 'lineEnd', 'summary', 'confidence', 'commitSha', 'verifiedAt', 'metadata'])
+      ? changedFieldsFor(existing, planned, ['targetType', 'targetId', 'evidenceType', 'path', 'symbol', 'lineStart', 'lineEnd', 'summary', 'confidence', 'sourceType', 'sourcePriority', 'commitSha', 'verifiedAt', 'metadata'])
       : [];
     if (data.dryRun) {
       return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: planned, dryRun: true, previewId: existing ? undefined : id };
@@ -1136,8 +1212,8 @@ export class FuncTreeRepository {
     this.db
       .prepare(
         `INSERT INTO evidence
-          (id, project_id, target_type, target_id, evidence_type, signature, path, symbol, line_start, line_end, summary, confidence, commit_sha, verified_at, metadata_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, project_id, target_type, target_id, evidence_type, signature, path, symbol, line_start, line_end, summary, confidence, source_type, source_priority, commit_sha, verified_at, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            target_type = excluded.target_type,
            target_id = excluded.target_id,
@@ -1149,6 +1225,8 @@ export class FuncTreeRepository {
            line_end = excluded.line_end,
            summary = excluded.summary,
            confidence = excluded.confidence,
+           source_type = excluded.source_type,
+           source_priority = excluded.source_priority,
            commit_sha = excluded.commit_sha,
            verified_at = excluded.verified_at,
            metadata_json = excluded.metadata_json,
@@ -1167,6 +1245,8 @@ export class FuncTreeRepository {
         planned.lineEnd,
         planned.summary,
         planned.confidence,
+        planned.sourceType,
+        planned.sourcePriority,
         planned.commitSha,
         planned.verifiedAt,
         json(planned.metadata),
@@ -1187,6 +1267,233 @@ export class FuncTreeRepository {
     const data = BatchEvidenceSchema.parse(input);
     this.getProject(data.projectId);
     return this.runBatch(data.dryRun, data.items, (item) => this.upsertEvidence(data.projectId, { ...item, dryRun: data.dryRun }));
+  }
+
+  upsertCapabilityStatus(projectId: string, input: CreateCapabilityStatusInput): UpsertResult<CapabilityStatusRow> {
+    const data = CreateCapabilityStatusSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
+    this.getProject(projectId);
+    const refs = this.resolveCapabilityReferences(projectId, data, { requireMap: true });
+    this.assertEvidenceIds(projectId, data.evidenceIds);
+    const now = nowIso();
+    const signature = capabilityStatusSignature(refs.canonicalFeature.id, refs.map?.id ?? '', refs.feature?.id ?? null);
+    const existing = this.findCapabilityStatusForUpsert(projectId, data.id, signature);
+    const id = existing?.id ?? data.id ?? (data.dryRun ? previewId('cst') : newId('cst'));
+    const planned = {
+      id,
+      projectId,
+      canonicalFeatureId: refs.canonicalFeature.id,
+      mapId: refs.map?.id ?? '',
+      featureId: refs.feature?.id ?? null,
+      signature,
+      status: data.status,
+      summary: data.summary,
+      gaps: data.gaps,
+      recommendedAction: data.recommendedAction,
+      evidenceIds: data.evidenceIds,
+      metadata: data.metadata,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    } satisfies CapabilityStatusRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, ['canonicalFeatureId', 'mapId', 'featureId', 'status', 'summary', 'gaps', 'recommendedAction', 'evidenceIds', 'metadata'])
+      : [];
+    if (data.dryRun) {
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: this.enrichCapabilityStatus(planned), dryRun: true, previewId: existing ? undefined : id };
+    }
+    if (existing && changedFields.length === 0) {
+      return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO capability_statuses
+          (id, project_id, canonical_feature_id, map_id, feature_id, signature, status, summary, gaps_json, recommended_action, evidence_ids_json, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           canonical_feature_id = excluded.canonical_feature_id,
+           map_id = excluded.map_id,
+           feature_id = excluded.feature_id,
+           signature = excluded.signature,
+           status = excluded.status,
+           summary = excluded.summary,
+           gaps_json = excluded.gaps_json,
+           recommended_action = excluded.recommended_action,
+           evidence_ids_json = excluded.evidence_ids_json,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        id,
+        projectId,
+        planned.canonicalFeatureId,
+        planned.mapId,
+        planned.featureId,
+        planned.signature,
+        planned.status,
+        planned.summary,
+        jsonArray(planned.gaps),
+        planned.recommendedAction,
+        jsonArray(planned.evidenceIds),
+        json(planned.metadata),
+        now,
+        now
+      );
+    this.touchProject(projectId);
+    this.recordEvent(projectId, 'http', 'upsert_capability_status', { id, canonicalFeatureId: planned.canonicalFeatureId, mapId: planned.mapId, status: planned.status });
+    return {
+      operation: existing ? 'updated' : 'created',
+      changedFields,
+      data: this.getCapabilityStatus(id),
+      dryRun: false
+    };
+  }
+
+  upsertCapabilityStatusesBatch(input: BatchCapabilityStatusInput): BatchUpsertResult<CapabilityStatusRow> {
+    const data = BatchCapabilityStatusSchema.parse(input);
+    this.getProject(data.projectId);
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertCapabilityStatus(data.projectId, { ...item, dryRun: data.dryRun }));
+  }
+
+  upsertCapabilityGap(projectId: string, input: CreateCapabilityGapInput): UpsertResult<CapabilityGapRow> {
+    const data = CreateCapabilityGapSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
+    this.getProject(projectId);
+    const refs = this.resolveCapabilityReferences(projectId, data, { requireMap: false });
+    const ownerMapId = this.resolveOptionalMapId(projectId, data.ownerMapId, data.ownerMapStableKey);
+    this.assertEvidenceIds(projectId, data.evidenceIds);
+    const now = nowIso();
+    const signature = data.stableKey ? `stable:${data.stableKey}` : capabilityGapSignature(refs.canonicalFeature.id, refs.map?.id ?? null, refs.feature?.id ?? null, data.gapType, data.title);
+    const existing = this.findCapabilityGapForUpsert(projectId, data.id, data.stableKey, signature);
+    const id = existing?.id ?? data.id ?? (data.dryRun ? previewId('gap') : newId('gap'));
+    const planned = {
+      id,
+      projectId,
+      stableKey: data.stableKey ?? existing?.stableKey ?? '',
+      signature,
+      canonicalFeatureId: refs.canonicalFeature.id,
+      mapId: refs.map?.id ?? null,
+      featureId: refs.feature?.id ?? null,
+      gapType: data.gapType,
+      severity: data.severity,
+      status: data.status,
+      title: data.title,
+      description: data.description,
+      evidenceIds: data.evidenceIds,
+      recommendedAction: data.recommendedAction,
+      ownerMapId,
+      metadata: data.metadata,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    } satisfies CapabilityGapRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, ['stableKey', 'canonicalFeatureId', 'mapId', 'featureId', 'gapType', 'severity', 'status', 'title', 'description', 'evidenceIds', 'recommendedAction', 'ownerMapId', 'metadata'])
+      : [];
+    if (data.dryRun) {
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: this.enrichCapabilityGap(planned), dryRun: true, previewId: existing ? undefined : id };
+    }
+    if (existing && changedFields.length === 0) {
+      return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO capability_gaps
+          (id, project_id, stable_key, signature, canonical_feature_id, map_id, feature_id, gap_type, severity, status, title, description, evidence_ids_json, recommended_action, owner_map_id, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           stable_key = excluded.stable_key,
+           signature = excluded.signature,
+           canonical_feature_id = excluded.canonical_feature_id,
+           map_id = excluded.map_id,
+           feature_id = excluded.feature_id,
+           gap_type = excluded.gap_type,
+           severity = excluded.severity,
+           status = excluded.status,
+           title = excluded.title,
+           description = excluded.description,
+           evidence_ids_json = excluded.evidence_ids_json,
+           recommended_action = excluded.recommended_action,
+           owner_map_id = excluded.owner_map_id,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        id,
+        projectId,
+        planned.stableKey,
+        planned.signature,
+        planned.canonicalFeatureId,
+        planned.mapId,
+        planned.featureId,
+        planned.gapType,
+        planned.severity,
+        planned.status,
+        planned.title,
+        planned.description,
+        jsonArray(planned.evidenceIds),
+        planned.recommendedAction,
+        planned.ownerMapId,
+        json(planned.metadata),
+        now,
+        now
+      );
+    this.touchProject(projectId);
+    this.recordEvent(projectId, 'http', 'upsert_capability_gap', { id, canonicalFeatureId: planned.canonicalFeatureId, gapType: planned.gapType, severity: planned.severity });
+    return {
+      operation: existing ? 'updated' : 'created',
+      changedFields,
+      data: this.getCapabilityGap(id),
+      dryRun: false
+    };
+  }
+
+  upsertCapabilityGapsBatch(input: BatchCapabilityGapInput): BatchUpsertResult<CapabilityGapRow> {
+    const data = BatchCapabilityGapSchema.parse(input);
+    this.getProject(data.projectId);
+    return this.runBatch(data.dryRun, data.items, (item) => this.upsertCapabilityGap(data.projectId, { ...item, dryRun: data.dryRun }));
+  }
+
+  getCapabilityStatus(statusId: string): CapabilityStatusRow {
+    const row = this.db.prepare('SELECT * FROM capability_statuses WHERE id = ?').get(statusId);
+    if (!row) {
+      throw new NotFoundError(`能力状态不存在: ${statusId}`);
+    }
+    return this.enrichCapabilityStatus(mapCapabilityStatus(row));
+  }
+
+  getCapabilityGap(gapId: string): CapabilityGapRow {
+    const row = this.db.prepare('SELECT * FROM capability_gaps WHERE id = ?').get(gapId);
+    if (!row) {
+      throw new NotFoundError(`能力缺口不存在: ${gapId}`);
+    }
+    return this.enrichCapabilityGap(mapCapabilityGap(row));
+  }
+
+  capabilityMatrix(input: CapabilityMatrixInput): CapabilityMatrixResult {
+    const data = CapabilityMatrixSchema.parse(input);
+    const project = this.getProject(data.projectId);
+    const canonicalFeature = data.canonicalFeatureId || data.canonicalFeatureStableKey
+      ? this.resolveCapabilityReferences(data.projectId, data, { requireMap: false }).canonicalFeature
+      : null;
+    const mapId = this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined;
+    const statuses = this.listCapabilityStatuses(data.projectId, { canonicalFeatureId: canonicalFeature?.id, mapId });
+    const gaps = data.includeGaps ? this.listCapabilityGaps(data.projectId, { canonicalFeatureId: canonicalFeature?.id, mapId }) : [];
+    const evidence = data.includeEvidence ? this.evidenceForIds(data.projectId, unique([...statuses.flatMap((status) => status.evidenceIds), ...gaps.flatMap((gap) => gap.evidenceIds)])) : [];
+    return {
+      project,
+      canonicalFeature,
+      statuses,
+      gaps,
+      evidence,
+      summary: {
+        statusCounts: countBy(statuses, (status) => status.status),
+        openGapCount: gaps.filter((gap) => gap.status === 'open').length,
+        highSeverityGapCount: gaps.filter((gap) => gap.severity === 'high' && gap.status === 'open').length
+      }
+    };
   }
 
   getEvidence(evidenceId: string): EvidenceRow {
@@ -1450,6 +1757,7 @@ export class FuncTreeRepository {
     const allEntryPoints = include.has('entryPoints') ? this.entryPointsForReferences(data.projectId, allReferences, feature.mapId) : [];
     const evidence = include.has('evidence') ? this.evidenceForTargets(data.projectId, new Set([`feature:${feature.id}`, ...allReferences.map((reference) => `code_reference:${reference.id}`), ...alignments.map((alignment) => `alignment:${alignment.id}`)])) : [];
     const detail = featureWithDetails.details ?? null;
+    const capabilityMatrix = include.has('statusMatrix') || include.has('gaps') ? this.capabilityMatrix({ projectId: data.projectId, canonicalFeatureId: feature.id, includeGaps: include.has('gaps'), includeEvidence: include.has('evidence') }) : null;
     const qualityIssues = include.has('quality') ? this.qualityIssuesForFeature(data.projectId, featureWithDetails, detail, allReferences, alignments, evidence, undefined) : [];
 
     return {
@@ -1463,6 +1771,8 @@ export class FuncTreeRepository {
       alignments,
       impactedFeatures: impactedFeatures.filter((item) => item.id !== feature.id),
       evidence,
+      capabilityMatrix: include.has('statusMatrix') ? capabilityMatrix : null,
+      capabilityGaps: include.has('gaps') ? capabilityMatrix?.gaps ?? [] : [],
       risks: include.has('risks') ? detail?.risks ?? [] : [],
       acceptanceCriteria: include.has('acceptanceCriteria') ? detail?.acceptanceCriteria ?? [] : [],
       verification: allReferences.map((reference) => reference.verificationHint).filter(isString),
@@ -1497,6 +1807,9 @@ export class FuncTreeRepository {
     let blockedDetailGaps = 0;
     let deprecatedDetailGaps = 0;
     let mockBoundaryGaps = 0;
+    const capabilityGaps = this.listCapabilityGaps(data.projectId, {});
+    const openCapabilityGaps = capabilityGaps.filter((gap) => gap.status === 'open').length;
+    const highSeverityCapabilityGaps = capabilityGaps.filter((gap) => gap.status === 'open' && gap.severity === 'high').length;
 
     for (const feature of features) {
       const references = referencesByFeature.get(feature.id) ?? [];
@@ -1547,6 +1860,8 @@ export class FuncTreeRepository {
         blockedDetailGaps,
         deprecatedDetailGaps,
         mockBoundaryGaps,
+        openCapabilityGaps,
+        highSeverityCapabilityGaps,
         missingPaths
       },
       issues
@@ -1615,6 +1930,9 @@ export class FuncTreeRepository {
     if (!input.targetStableKey) {
       throw new ValidationError('证据需要 targetId 或 targetStableKey。');
     }
+    if (input.targetType === 'capability_status' || input.targetType === 'capability_gap') {
+      throw new ValidationError('capability_status/capability_gap 证据目标请使用 targetId。');
+    }
     const resolved = this.resolveStableKeyItem(projectId, {
       type: input.targetType as ResolveStableKeyType,
       stableKey: input.targetStableKey,
@@ -1632,6 +1950,20 @@ export class FuncTreeRepository {
     if (targetType === 'alignment') {
       const alignment = this.getAlignment(targetId);
       if (alignment.projectId !== projectId) {
+        throw new ValidationError('证据目标不属于当前项目。');
+      }
+      return;
+    }
+    if (targetType === 'capability_status') {
+      const status = this.getCapabilityStatus(targetId);
+      if (status.projectId !== projectId) {
+        throw new ValidationError('证据目标不属于当前项目。');
+      }
+      return;
+    }
+    if (targetType === 'capability_gap') {
+      const gap = this.getCapabilityGap(targetId);
+      if (gap.projectId !== projectId) {
         throw new ValidationError('证据目标不属于当前项目。');
       }
       return;
@@ -1679,7 +2011,196 @@ export class FuncTreeRepository {
         return targetId;
       }
     }
+    if (targetType === 'capability_status') {
+      try {
+        return this.getCapabilityStatus(targetId).summary || targetId;
+      } catch {
+        return targetId;
+      }
+    }
+    if (targetType === 'capability_gap') {
+      try {
+        return this.getCapabilityGap(targetId).title;
+      } catch {
+        return targetId;
+      }
+    }
     return this.alignableLabel(targetType, targetId);
+  }
+
+  private resolveCapabilityReferences(
+    projectId: string,
+    input: {
+      canonicalFeatureId?: string;
+      canonicalFeatureStableKey?: string;
+      canonicalMapId?: string;
+      canonicalMapStableKey?: string;
+      canonicalFeatureVersion?: string;
+      mapId?: string;
+      mapStableKey?: string;
+      featureId?: string;
+      featureStableKey?: string;
+      featureVersion?: string;
+    },
+    options: { requireMap: boolean }
+  ): { canonicalFeature: FeatureRow; map: FeatureMapRow | null; feature: FeatureRow | null } {
+    const canonicalMapId = this.resolveOptionalMapId(projectId, input.canonicalMapId, input.canonicalMapStableKey) ?? undefined;
+    const canonicalFeature = input.canonicalFeatureId
+      ? this.getFeature(input.canonicalFeatureId)
+      : this.resolveFeatureByStableKey(projectId, input.canonicalFeatureStableKey ?? '', input.canonicalFeatureVersion, canonicalMapId);
+    if (canonicalFeature.projectId !== projectId) {
+      throw new ValidationError('canonical feature 不属于当前项目。');
+    }
+
+    const mapId = this.resolveOptionalMapId(projectId, input.mapId, input.mapStableKey);
+    if (options.requireMap && !mapId) {
+      throw new ValidationError('需要 mapId 或 mapStableKey。');
+    }
+    const map = mapId ? this.getMap(mapId) : null;
+    let feature: FeatureRow | null = null;
+    if (input.featureId) {
+      feature = this.getFeature(input.featureId);
+      if (feature.projectId !== projectId) {
+        throw new ValidationError('feature 不属于当前项目。');
+      }
+      if (map && feature.mapId !== map.id) {
+        throw new ValidationError('feature 与 mapId/mapStableKey 不一致。');
+      }
+    } else if (input.featureStableKey) {
+      feature = this.resolveFeatureByStableKey(projectId, input.featureStableKey, input.featureVersion, map?.id);
+    }
+    return { canonicalFeature, map, feature };
+  }
+
+  private assertEvidenceIds(projectId: string, evidenceIds: string[]): void {
+    for (const evidenceId of evidenceIds) {
+      const evidence = this.getEvidence(evidenceId);
+      if (evidence.projectId !== projectId) {
+        throw new ValidationError(`证据不属于当前项目: ${evidenceId}`);
+      }
+    }
+  }
+
+  private findCapabilityStatusForUpsert(projectId: string, id: string | undefined, signature: string): CapabilityStatusRow | null {
+    const matches = [
+      id ? this.findCapabilityStatusById(id) : null,
+      signature ? this.findCapabilityStatusBySignature(projectId, signature) : null
+    ].filter((status): status is CapabilityStatusRow => Boolean(status));
+    for (const status of matches) {
+      if (status.projectId !== projectId) {
+        throw new ValidationError('能力状态 ID 不属于当前项目。');
+      }
+    }
+    const [first] = matches;
+    if (first && matches.some((status) => status.id !== first.id)) {
+      throw new ValidationError('能力状态 id 和签名指向不同对象，请先查询上下文确认。');
+    }
+    return first ?? null;
+  }
+
+  private findCapabilityGapForUpsert(projectId: string, id: string | undefined, stableKey: string | undefined, signature: string): CapabilityGapRow | null {
+    const matches = [
+      id ? this.findCapabilityGapById(id) : null,
+      stableKey ? this.findCapabilityGapByStableKey(projectId, stableKey) : null,
+      signature ? this.findCapabilityGapBySignature(projectId, signature) : null
+    ].filter((gap): gap is CapabilityGapRow => Boolean(gap));
+    for (const gap of matches) {
+      if (gap.projectId !== projectId) {
+        throw new ValidationError('能力缺口 ID 不属于当前项目。');
+      }
+    }
+    const [first] = matches;
+    if (first && matches.some((gap) => gap.id !== first.id)) {
+      throw new ValidationError('能力缺口 id、stableKey 或签名指向不同对象，请先查询上下文确认。');
+    }
+    return first ?? null;
+  }
+
+  private findCapabilityStatusById(id: string): CapabilityStatusRow | null {
+    const row = this.db.prepare('SELECT * FROM capability_statuses WHERE id = ?').get(id);
+    return row ? this.enrichCapabilityStatus(mapCapabilityStatus(row)) : null;
+  }
+
+  private findCapabilityStatusBySignature(projectId: string, signature: string): CapabilityStatusRow | null {
+    const row = this.db.prepare('SELECT * FROM capability_statuses WHERE project_id = ? AND signature = ?').get(projectId, signature);
+    return row ? this.enrichCapabilityStatus(mapCapabilityStatus(row)) : null;
+  }
+
+  private findCapabilityGapById(id: string): CapabilityGapRow | null {
+    const row = this.db.prepare('SELECT * FROM capability_gaps WHERE id = ?').get(id);
+    return row ? this.enrichCapabilityGap(mapCapabilityGap(row)) : null;
+  }
+
+  private findCapabilityGapByStableKey(projectId: string, stableKey: string): CapabilityGapRow | null {
+    const row = this.db.prepare('SELECT * FROM capability_gaps WHERE project_id = ? AND stable_key = ?').get(projectId, stableKey);
+    return row ? this.enrichCapabilityGap(mapCapabilityGap(row)) : null;
+  }
+
+  private findCapabilityGapBySignature(projectId: string, signature: string): CapabilityGapRow | null {
+    const row = this.db.prepare('SELECT * FROM capability_gaps WHERE project_id = ? AND signature = ?').get(projectId, signature);
+    return row ? this.enrichCapabilityGap(mapCapabilityGap(row)) : null;
+  }
+
+  private listCapabilityStatuses(projectId: string, filters: { canonicalFeatureId?: string; mapId?: string }): CapabilityStatusRow[] {
+    const where = ['project_id = ?'];
+    const args: SQLInputValue[] = [projectId];
+    if (filters.canonicalFeatureId) {
+      where.push('canonical_feature_id = ?');
+      args.push(filters.canonicalFeatureId);
+    }
+    if (filters.mapId) {
+      where.push('map_id = ?');
+      args.push(filters.mapId);
+    }
+    return this.db
+      .prepare(`SELECT * FROM capability_statuses WHERE ${where.join(' AND ')} ORDER BY canonical_feature_id, map_id, feature_id`)
+      .all(...args)
+      .map((row) => this.enrichCapabilityStatus(mapCapabilityStatus(row)));
+  }
+
+  private listCapabilityGaps(projectId: string, filters: { canonicalFeatureId?: string; mapId?: string }): CapabilityGapRow[] {
+    const where = ['project_id = ?'];
+    const args: SQLInputValue[] = [projectId];
+    if (filters.canonicalFeatureId) {
+      where.push('canonical_feature_id = ?');
+      args.push(filters.canonicalFeatureId);
+    }
+    if (filters.mapId) {
+      where.push('(map_id = ? OR owner_map_id = ?)');
+      args.push(filters.mapId, filters.mapId);
+    }
+    return this.db
+      .prepare(`SELECT * FROM capability_gaps WHERE ${where.join(' AND ')} ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, status, title`)
+      .all(...args)
+      .map((row) => this.enrichCapabilityGap(mapCapabilityGap(row)));
+  }
+
+  private enrichCapabilityStatus(status: CapabilityStatusRow): CapabilityStatusRow {
+    return {
+      ...status,
+      canonicalFeature: this.findFeatureById(status.canonicalFeatureId) ?? undefined,
+      map: this.findMapById(status.mapId) ?? undefined,
+      feature: status.featureId ? this.findFeatureById(status.featureId) : null
+    };
+  }
+
+  private enrichCapabilityGap(gap: CapabilityGapRow): CapabilityGapRow {
+    return {
+      ...gap,
+      canonicalFeature: this.findFeatureById(gap.canonicalFeatureId) ?? undefined,
+      map: gap.mapId ? this.findMapById(gap.mapId) : null,
+      feature: gap.featureId ? this.findFeatureById(gap.featureId) : null,
+      ownerMap: gap.ownerMapId ? this.findMapById(gap.ownerMapId) : null
+    };
+  }
+
+  private evidenceForIds(projectId: string, evidenceIds: string[]): EvidenceRow[] {
+    if (evidenceIds.length === 0) return [];
+    const placeholders = evidenceIds.map(() => '?').join(', ');
+    return this.db
+      .prepare(`SELECT * FROM evidence WHERE project_id = ? AND id IN (${placeholders}) ORDER BY source_priority DESC, updated_at DESC`)
+      .all(projectId, ...evidenceIds)
+      .map((row) => this.mapEvidenceWithLabel(row));
   }
 
   private codeReferencesForFeatures(projectId: string, featureIds: string[]): CodeReferenceRow[] {
@@ -3219,8 +3740,54 @@ function mapEvidence(row: unknown): EvidenceRow {
     lineEnd: nullableNumber(value.line_end),
     summary: String(value.summary ?? ''),
     confidence: Number(value.confidence ?? 1),
+    sourceType: String(value.source_type ?? 'runtime_code'),
+    sourcePriority: Number(value.source_priority ?? 80),
     commitSha: String(value.commit_sha ?? ''),
     verifiedAt: String(value.verified_at ?? ''),
+    metadata: parseJson(value.metadata_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at)
+  };
+}
+
+function mapCapabilityStatus(row: unknown): CapabilityStatusRow {
+  const value = row as Record<string, unknown>;
+  return {
+    id: String(value.id),
+    projectId: String(value.project_id),
+    canonicalFeatureId: String(value.canonical_feature_id),
+    mapId: String(value.map_id),
+    featureId: value.feature_id ? String(value.feature_id) : null,
+    signature: String(value.signature),
+    status: String(value.status),
+    summary: String(value.summary ?? ''),
+    gaps: parseStringArray(value.gaps_json),
+    recommendedAction: String(value.recommended_action ?? ''),
+    evidenceIds: parseStringArray(value.evidence_ids_json),
+    metadata: parseJson(value.metadata_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at)
+  };
+}
+
+function mapCapabilityGap(row: unknown): CapabilityGapRow {
+  const value = row as Record<string, unknown>;
+  return {
+    id: String(value.id),
+    projectId: String(value.project_id),
+    stableKey: String(value.stable_key ?? ''),
+    signature: String(value.signature),
+    canonicalFeatureId: String(value.canonical_feature_id),
+    mapId: value.map_id ? String(value.map_id) : null,
+    featureId: value.feature_id ? String(value.feature_id) : null,
+    gapType: String(value.gap_type),
+    severity: String(value.severity) as 'high' | 'medium' | 'low',
+    status: String(value.status),
+    title: String(value.title),
+    description: String(value.description ?? ''),
+    evidenceIds: parseStringArray(value.evidence_ids_json),
+    recommendedAction: String(value.recommended_action ?? ''),
+    ownerMapId: value.owner_map_id ? String(value.owner_map_id) : null,
     metadata: parseJson(value.metadata_json),
     createdAt: String(value.created_at),
     updatedAt: String(value.updated_at)
@@ -3326,6 +3893,22 @@ function alignmentMemberSignature(members: Array<{ targetType: string; targetId:
     .map((member) => `${member.role}:${member.targetType}:${member.targetId}`)
     .sort()
     .join('|');
+}
+
+function capabilityStatusSignature(canonicalFeatureId: string, mapId: string, featureId: string | null): string {
+  return [canonicalFeatureId, mapId, featureId ?? ''].join('|');
+}
+
+function capabilityGapSignature(canonicalFeatureId: string, mapId: string | null, featureId: string | null, gapType: string, title: string): string {
+  return [canonicalFeatureId, mapId ?? '', featureId ?? '', gapType, title.trim().toLowerCase()].join('|');
+}
+
+function countBy<T>(items: T[], selector: (item: T) => string): Record<string, number> {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    const key = selector(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 function appendKeywordClause(where: string[], args: SQLInputValue[], alias: string, columns: string[], keyword: string): void {
