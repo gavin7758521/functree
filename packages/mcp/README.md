@@ -63,6 +63,15 @@ approval_mode = "approve"
 [mcp_servers.functree.tools.functree_upsert_capability_gap]
 approval_mode = "approve"
 
+[mcp_servers.functree.tools.functree_start_feature_focus]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_feature_focus]
+approval_mode = "approve"
+
+[mcp_servers.functree.tools.functree_upsert_feature_dossier]
+approval_mode = "approve"
+
 [mcp_servers.functree.tools.functree_upsert_alignment]
 approval_mode = "approve"
 
@@ -97,7 +106,7 @@ approval_mode = "approve"
 approval_mode = "approve"
 ```
 
-`functree_query_context`, `functree_resolve_stable_keys`, `functree_project_summary`, `functree_get_capability_matrix`, `functree_get_programming_context`, `functree_quality_report`, and `functree_query_path_context` are read-only.
+`functree_query_context`, `functree_search_features`, `functree_prepare_feature_work`, `functree_query_feature_focuses`, `functree_resolve_stable_keys`, `functree_project_summary`, `functree_get_feature_dossier`, `functree_get_feature_readiness`, `functree_get_capability_matrix`, `functree_get_programming_context`, `functree_quality_report`, and `functree_query_path_context` are read-only.
 
 ## Tools
 
@@ -109,6 +118,9 @@ approval_mode = "approve"
 - `functree_upsert_evidence`: create or update evidence for a map, feature, alignment, entry point, code reference, capability status, or capability gap; distinguishes `code_fact`, `doc_claim`, `inferred`, `planned`, `mock_only`, and `deprecated`, with source type and source priority.
 - `functree_upsert_capability_status`: create or update one status matrix cell for a canonical feature in a map, such as `prototype`, `mock`, `partial`, `live`, `configured`, or `deployed`.
 - `functree_upsert_capability_gap`: create or update a structured capability gap/conflict with type, severity, evidence IDs, owner map, and recommended action.
+- `functree_start_feature_focus`: start feature-first work when the target feature does not exist yet; creates/updates the canonical map, canonical feature, and focus workflow in one idempotent call.
+- `functree_upsert_feature_focus`: create or update a focused analysis workflow for one feature, including question, scope, source refs, seed paths, target maps, related features, findings, next steps, and confidence.
+- `functree_upsert_feature_dossier`: create or update one feature-centered dossier in a single idempotent call: canonical feature, implementation slices, statuses, inline evidence, entry points, code references, gaps/conflicts, and alignments.
 - `functree_upsert_alignment`: create or update a cross-layer alignment relation by `id`, `stableKey`, or member set. Members can use `targetId` or stable keys.
 - `functree_upsert_maps_batch`: batch upsert maps with `dryRun` and per-item errors.
 - `functree_upsert_features_batch`: batch upsert features across one or more maps with `dryRun` and rollback on write failure.
@@ -118,12 +130,17 @@ approval_mode = "approve"
 - `functree_upsert_capability_statuses_batch`: batch upsert capability status matrix cells.
 - `functree_upsert_capability_gaps_batch`: batch upsert capability gaps/conflicts.
 - `functree_upsert_alignments_batch`: batch upsert alignments with member-set de-duplication.
-- `functree_query_context`: read project, map, feature, entry point, code reference, evidence, and alignment context with filters, `view: "lite"`, `includeDetails`, summary-only mode, and cursor pagination.
-- `functree_resolve_stable_keys`: resolve stable keys to concrete IDs in bulk.
-- `functree_project_summary`: read project counts, latest scan, conflicts, and orphan reference counts.
+- `functree_query_context`: read project, map, feature, feature focus, entry point, code reference, evidence, and alignment context with filters, `view: "lite"`, `includeDetails`, summary-only mode, and cursor pagination.
+- `functree_search_features`: feature-first search by feature name, stableKey fragment, product requirement, or code path; returns candidate features with maps, match reasons, active focuses, gaps, matching code references, and next action.
+- `functree_prepare_feature_work`: prepare a feature-first work package from a feature focus, feature ID, stableKey, feature name, requirement fragment, or code path; returns readiness, selected focus/candidate, dossier, programming context, next steps, recommended tool calls, or suggested start payload.
+- `functree_query_feature_focuses`: read focused analysis workflows by project, feature, focus stableKey, keyword, mode, status, priority, source type, or owning map before continuing feature-first work.
+- `functree_resolve_stable_keys`: resolve stable keys to concrete IDs in bulk, including feature focus stableKeys for resuming focused work.
+- `functree_project_summary`: read project counts, feature focus/open focus counts, latest focus, latest scan, conflicts, and orphan reference counts.
+- `functree_get_feature_dossier`: read a feature-first dossier from a focus or feature reference: selected focus, canonical feature, implementation slices, status matrix, gaps/conflicts, evidence, code references, entry points, alignments, related features, and quality issues.
+- `functree_get_feature_readiness`: check whether one feature/focus is deep enough for implementation; returns readiness status, score, required axis coverage, missing axes, checks, next steps, and recommended tool calls.
 - `functree_get_capability_matrix`: read a canonical feature status matrix across product/web/backend/sdk/ops maps, including gaps and supporting evidence.
-- `functree_get_programming_context`: read the prioritized context for changing one feature: entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, capability matrix, gaps, and quality issues.
-- `functree_quality_report`: read project-level coverage gaps such as missing code references, missing alignments, missing `code_fact` evidence, thin draft/in-progress details, mock boundaries, and stale paths.
+- `functree_get_programming_context`: read the prioritized context for changing one focus or feature: selected focus, active feature focuses, seedPathContexts, next actions, seed paths, entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, capability matrix, gaps, and quality issues.
+- `functree_quality_report`: read project, map, feature, or focus scoped coverage gaps such as missing code references, missing alignments, missing `code_fact` evidence, thin draft/in-progress details, mock boundaries, and stale paths.
 - `functree_query_path_context`: read existing entry points/code references and related objects for a path.
 - `functree_begin_scan`: record the start of a Git commit scan.
 - `functree_finish_scan`: finish a scan and store its summary.

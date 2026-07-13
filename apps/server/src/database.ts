@@ -197,6 +197,30 @@ function migrate(db: Db): void {
       UNIQUE(project_id, signature)
     );
 
+    CREATE TABLE IF NOT EXISTS feature_focuses (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      stable_key TEXT NOT NULL DEFAULT '',
+      feature_id TEXT NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      status TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      question TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT '',
+      source_refs_json TEXT NOT NULL DEFAULT '[]',
+      seed_paths_json TEXT NOT NULL DEFAULT '[]',
+      target_map_ids_json TEXT NOT NULL DEFAULT '[]',
+      related_feature_ids_json TEXT NOT NULL DEFAULT '[]',
+      next_steps_json TEXT NOT NULL DEFAULT '[]',
+      findings TEXT NOT NULL DEFAULT '',
+      confidence REAL NOT NULL DEFAULT 0.5,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS scan_runs (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -275,6 +299,12 @@ function migrate(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_capability_gaps_status ON capability_gaps(status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_gaps_project_stable_key
       ON capability_gaps(project_id, stable_key)
+      WHERE stable_key <> '';
+    CREATE INDEX IF NOT EXISTS idx_feature_focuses_project ON feature_focuses(project_id);
+    CREATE INDEX IF NOT EXISTS idx_feature_focuses_feature ON feature_focuses(feature_id);
+    CREATE INDEX IF NOT EXISTS idx_feature_focuses_status ON feature_focuses(status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_feature_focuses_project_stable_key
+      ON feature_focuses(project_id, stable_key)
       WHERE stable_key <> '';
     CREATE INDEX IF NOT EXISTS idx_scan_runs_project ON scan_runs(project_id);
     CREATE INDEX IF NOT EXISTS idx_scan_runs_repo_commit ON scan_runs(project_id, repo_key, branch, commit_sha);

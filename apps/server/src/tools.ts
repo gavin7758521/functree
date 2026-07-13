@@ -15,16 +15,24 @@ import {
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateEvidenceSchema,
+  CreateFeatureFocusSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
+  FeatureDossierSchema,
+  FeatureReadinessSchema,
   FinishScanSchema,
+  PrepareFeatureWorkSchema,
   ProgrammingContextSchema,
   ProjectSummarySchema,
   QualityReportSchema,
+  QueryFeatureFocusesSchema,
   QueryPathContextSchema,
   QueryContextSchema,
-  ResolveStableKeysSchema
+  ResolveStableKeysSchema,
+  SearchFeaturesSchema,
+  StartFeatureFocusSchema,
+  UpsertFeatureDossierSchema
 } from '@functree/domain';
 import { ValidationError, type FuncTreeRepository } from './repository.js';
 
@@ -115,19 +123,44 @@ export const toolDefinitions = [
     description: '批量 upsert 结构化能力缺口和冲突，支持 dryRun 与逐项错误。'
   },
   {
+    name: 'functree_upsert_feature_dossier',
+    title: '写入功能档案',
+    description: '以一个 canonical feature 为中心聚合写入产品定义、实现切片、状态矩阵、证据、入口、代码引用、缺口和对齐关系。'
+  },
+  {
+    name: 'functree_upsert_feature_focus',
+    title: '写入功能焦点',
+    description: '创建或更新一次围绕单个功能的分析焦点，记录本次问题、范围、来源、种子路径、目标地图、相关功能、下一步和结论，适合先深挖一个功能再扩展功能地图。'
+  },
+  {
+    name: 'functree_start_feature_focus',
+    title: '启动功能焦点',
+    description: '从产品文档、需求或功能名直接启动单功能深挖：自动 upsert canonical map、canonical feature 和功能焦点，适合目标功能尚未存在时使用。'
+  },
+  {
     name: 'functree_query_context',
     title: '查询上下文',
-    description: '只读查询 FuncTree 项目、功能地图、功能、入口文件、代码引用和对齐关系，支持 lite 轻量模式、summaryOnly、includeMembers、keyword、types、stableKey、mapId/mapStableKey、path、offset/cursor 与统计摘要。'
+    description: '只读查询 FuncTree 项目、功能地图、功能、功能焦点、入口文件、代码引用、证据和对齐关系，支持 lite 轻量模式、summaryOnly、includeMembers、keyword、types、stableKey、mapId/mapStableKey、path、offset/cursor 与统计摘要。'
+  },
+  {
+    name: 'functree_search_features',
+    title: '搜索功能候选',
+    description: '只读按功能名、stableKey、需求片段或代码路径搜索候选功能，返回所在 map、匹配原因、已有焦点、开放缺口、匹配代码引用和下一步建议。适合作为功能优先工作流的第一步。'
+  },
+  {
+    name: 'functree_prepare_feature_work',
+    title: '准备功能工作上下文',
+    description: '只读按 focusId、focusStableKey、featureId、stableKey、功能名、需求片段或代码路径准备单功能工作包；返回选中的焦点/候选、功能档案、AI 编程上下文、下一步建议和 recommendedToolCalls，或返回启动新焦点建议。'
   },
   {
     name: 'functree_resolve_stable_keys',
     title: '批量解析 stableKey',
-    description: '只读批量解析 project/map/feature/entry_point/code_reference/alignment 的 stableKey 到真实 ID，支持 mapStableKey 与 version，避免上下文截断后手工复制 ID。'
+    description: '只读批量解析 project/map/feature/feature_focus/entry_point/code_reference/alignment 的 stableKey 到真实 ID，支持 mapStableKey 与 version，避免上下文截断后手工复制 ID。'
   },
   {
     name: 'functree_project_summary',
     title: '项目摘要',
-    description: '只读返回项目级统计、最近扫描、stableKey 冲突和孤儿代码引用数量，供大规模同步后确认。'
+    description: '只读返回项目级统计、功能焦点数、开放焦点数、最近焦点、最近扫描、stableKey 冲突和孤儿代码引用数量，供大规模同步或开工前确认。'
   },
   {
     name: 'functree_get_capability_matrix',
@@ -135,14 +168,29 @@ export const toolDefinitions = [
     description: '只读返回 canonical feature 跨 product/web/backend/sdk/ops maps 的实现状态、缺口/冲突和关联证据。'
   },
   {
+    name: 'functree_get_feature_dossier',
+    title: '读取功能档案',
+    description: '只读按 focusId/focusStableKey 或 featureId/stableKey 围绕单个功能返回产品意图、实现切片、状态矩阵、缺口/冲突、证据、代码入口、对齐关系和质量问题。'
+  },
+  {
+    name: 'functree_get_feature_readiness',
+    title: '检查功能就绪度',
+    description: '只读围绕单个 feature 或 feature focus 判断分析是否足够深入，返回产品意图、范围、跨端覆盖、代码引用、证据、缺口、验收和 mock 边界的检查清单、分数、下一步和推荐工具调用。'
+  },
+  {
+    name: 'functree_query_feature_focuses',
+    title: '查询功能焦点',
+    description: '只读查询项目、某个功能或某个 stableKey 下的功能焦点，支持 keyword、mode、status、priority、sourceType 和功能地图过滤，用于接续当前分析任务、查看下一步扩展方向和避免重复分析。'
+  },
+  {
     name: 'functree_get_programming_context',
     title: '获取 AI 编程上下文',
-    description: '只读按 feature 组织编程上下文，返回必读入口、关键实现文件、对齐关系、影响功能、风险、验收条件、证据和质量问题。'
+    description: '只读按 focusId/focusStableKey 或单个 feature 组织编程上下文，返回当前功能焦点、推荐行动、seedPathContexts、必读入口、关键实现文件、对齐关系、影响功能、风险、验收条件、证据、缺口和质量问题。'
   },
   {
     name: 'functree_quality_report',
     title: '项目质量报告',
-    description: '只读返回缺少代码引用、缺少对齐、缺少代码事实证据、未稳定功能详情不足和失效路径等报告。'
+    description: '只读返回项目、功能地图、单个功能或功能焦点范围内缺少代码引用、缺少对齐、缺少代码事实证据、未稳定功能详情不足和失效路径等报告。'
   },
   {
     name: 'functree_query_path_context',
@@ -248,8 +296,27 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     case 'functree_upsert_capability_gaps_batch': {
       return repo.upsertCapabilityGapsBatch(BatchCapabilityGapSchema.parse(args));
     }
+    case 'functree_upsert_feature_dossier': {
+      return repo.upsertFeatureDossier(UpsertFeatureDossierSchema.parse(args));
+    }
+    case 'functree_upsert_feature_focus': {
+      const input = CreateFeatureFocusSchema.parse(args);
+      if (!input.projectId) {
+        throw new ValidationError('projectId 必填。');
+      }
+      return repo.upsertFeatureFocus(input.projectId, input);
+    }
+    case 'functree_start_feature_focus': {
+      return repo.startFeatureFocus(StartFeatureFocusSchema.parse(args));
+    }
     case 'functree_query_context': {
       return repo.queryContext(QueryContextSchema.parse(args));
+    }
+    case 'functree_search_features': {
+      return repo.searchFeatures(SearchFeaturesSchema.parse(args));
+    }
+    case 'functree_prepare_feature_work': {
+      return repo.prepareFeatureWork(PrepareFeatureWorkSchema.parse(args));
     }
     case 'functree_resolve_stable_keys': {
       return repo.resolveStableKeys(ResolveStableKeysSchema.parse(args));
@@ -259,6 +326,15 @@ export async function callTool(repo: FuncTreeRepository, name: string, args: unk
     }
     case 'functree_get_capability_matrix': {
       return repo.capabilityMatrix(CapabilityMatrixSchema.parse(args));
+    }
+    case 'functree_get_feature_dossier': {
+      return repo.featureDossier(FeatureDossierSchema.parse(args));
+    }
+    case 'functree_get_feature_readiness': {
+      return repo.featureReadiness(FeatureReadinessSchema.parse(args));
+    }
+    case 'functree_query_feature_focuses': {
+      return repo.listFeatureFocuses(QueryFeatureFocusesSchema.parse(args));
     }
     case 'functree_get_programming_context': {
       return repo.programmingContext(ProgrammingContextSchema.parse(args));

@@ -15,18 +15,27 @@ import {
   type CreateCodeReferenceInput,
   type CreateEntryPointInput,
   type CreateEvidenceInput,
+  type CreateFeatureFocusInput,
   type CreateFeatureInput,
   type CreateMapInput,
   type CreateProjectInput,
   type FinishScanInput,
+  type FeatureReadinessInput,
+  type FeatureDossierInput,
+  type MapAxis,
+  type PrepareFeatureWorkInput,
   type ProgrammingContextInput,
   type ProjectSummaryInput,
   type QualityReportInput,
   type QueryContextInput,
+  type QueryFeatureFocusesInput,
   type QueryContextType,
+  type SearchFeaturesInput,
+  type StartFeatureFocusInput,
   type QueryPathContextInput,
   type ResolveStableKeysInput,
   type ResolveStableKeyType,
+  type UpsertFeatureDossierInput,
   BeginScanSchema,
   BatchAlignmentSchema,
   BatchCodeReferenceSchema,
@@ -43,17 +52,25 @@ import {
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateEvidenceSchema,
+  CreateFeatureFocusSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
   FeatureDetailSchema,
   FinishScanSchema,
+  FeatureDossierSchema,
+  FeatureReadinessSchema,
+  PrepareFeatureWorkSchema,
   ProgrammingContextSchema,
   ProjectSummarySchema,
   QualityReportSchema,
   QueryPathContextSchema,
+  QueryFeatureFocusesSchema,
   QueryContextSchema,
   ResolveStableKeysSchema,
+  SearchFeaturesSchema,
+  StartFeatureFocusSchema,
+  UpsertFeatureDossierSchema,
   newId
 } from '@functree/domain';
 import fs from 'node:fs';
@@ -285,6 +302,34 @@ export type CapabilityGapRow = {
   ownerMap?: FeatureMapRow | null;
 };
 
+export type FeatureFocusRow = {
+  id: string;
+  projectId: string;
+  stableKey: string;
+  featureId: string;
+  title: string;
+  mode: string;
+  status: string;
+  priority: string;
+  sourceType: string;
+  question: string;
+  scope: string;
+  sourceRefs: string[];
+  seedPaths: string[];
+  targetMapIds: string[];
+  relatedFeatureIds: string[];
+  nextSteps: string[];
+  findings: string;
+  confidence: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  feature?: FeatureRow;
+  map?: FeatureMapRow;
+  targetMaps?: FeatureMapRow[];
+  relatedFeatures?: FeatureRow[];
+};
+
 export type UpsertOperation = 'created' | 'updated' | 'unchanged' | 'dry_run';
 
 export type UpsertResult<T> = {
@@ -319,6 +364,7 @@ export type QueryContextResult = {
   projects: Array<ProjectRow | QueryLiteRow>;
   maps: Array<FeatureMapRow | QueryLiteRow>;
   features: Array<FeatureRow | QueryLiteRow>;
+  featureFocuses: Array<FeatureFocusRow | QueryLiteRow>;
   alignments: Array<AlignmentRow | QueryLiteRow>;
   entryPoints: Array<EntryPointRow | QueryLiteRow>;
   codeReferences: Array<CodeReferenceRow | QueryLiteRow>;
@@ -337,10 +383,13 @@ export type QueryContextResult = {
     evidenceCount: number;
     entryPointCount: number;
     codeReferenceCount: number;
+    featureFocusCount: number;
+    openFeatureFocusCount: number;
     scanRunCount: number;
     lastUpdatedAt: string | null;
     stableKeyConflictCount: number;
     orphanCodeReferenceCount: number;
+    latestFeatureFocus: FeatureFocusRow | null;
     latestScanRun: ScanRunRow | null;
   };
 };
@@ -356,6 +405,95 @@ export type QueryLiteRow = {
   symbol?: string;
   kind?: string;
   updatedAt?: string;
+};
+
+export type FeatureSearchResult = {
+  project: ProjectRow;
+  query: string;
+  path: string;
+  candidates: FeatureSearchCandidate[];
+  suggestedStart: {
+    canonicalMapStableKey: string;
+    canonicalFeatureStableKey: string;
+    featureName: string;
+    reason: string;
+  } | null;
+  page: {
+    limit: number;
+    candidateCount: number;
+  };
+  summary: {
+    openFocusCount: number;
+    exactStableKeyMatches: number;
+    codeReferenceMatches: number;
+  };
+};
+
+export type FeatureSearchCandidate = {
+  feature: FeatureRow;
+  map: FeatureMapRow;
+  score: number;
+  reasons: string[];
+  openFocuses: FeatureFocusRow[];
+  codeReferenceCount: number;
+  matchingCodeReferences: CodeReferenceRow[];
+  gapCount: number;
+  openGaps: CapabilityGapRow[];
+  alignmentCount: number;
+  nextAction: string;
+};
+
+export type PreparedFeatureWorkResult = {
+  project: ProjectRow;
+  readiness: 'ready' | 'ambiguous' | 'needs_start';
+  search: FeatureSearchResult | null;
+  selectedCandidate: FeatureSearchCandidate | null;
+  selectedFocus: FeatureFocusRow | null;
+  dossier: FeatureDossierResult | null;
+  programmingContext: ProgrammingContextResult | null;
+  suggestedStart: FeatureSearchResult['suggestedStart'];
+  nextSteps: string[];
+  recommendedToolCalls: PreparedToolCall[];
+};
+
+export type PreparedToolCall = {
+  toolName: string;
+  priority: 'high' | 'medium' | 'low';
+  reason: string;
+  arguments: Record<string, unknown>;
+};
+
+export type FeatureReadinessCheck = {
+  id: string;
+  label: string;
+  status: 'pass' | 'warn' | 'fail';
+  severity: 'high' | 'medium' | 'low';
+  message: string;
+  hint: string;
+  targetType?: string;
+  targetId?: string;
+};
+
+export type FeatureReadinessResult = {
+  project: ProjectRow;
+  map: FeatureMapRow;
+  feature: FeatureRow;
+  selectedFocus: FeatureFocusRow | null;
+  readiness: 'ready' | 'needs_analysis' | 'needs_evidence' | 'needs_alignment' | 'blocked';
+  score: number;
+  requiredAxes: MapAxis[];
+  axisCoverage: Array<{
+    axis: MapAxis;
+    status: 'covered' | 'missing' | 'partial';
+    maps: FeatureMapRow[];
+    implementationStatuses: CapabilityStatusRow[];
+  }>;
+  checks: FeatureReadinessCheck[];
+  missingAxes: MapAxis[];
+  nextSteps: string[];
+  recommendedToolCalls: PreparedToolCall[];
+  dossier: FeatureDossierResult;
+  qualityReport: QualityReportResult;
 };
 
 export type ResolveStableKeysResult = {
@@ -393,6 +531,10 @@ export type ProgrammingContextResult = {
   map: FeatureMapRow;
   feature: FeatureRow;
   details: FeatureDetailRow | null;
+  selectedFocus: FeatureFocusRow | null;
+  focuses: FeatureFocusRow[];
+  seedPathContexts: QueryPathContextResult[];
+  nextActions: ProgrammingNextAction[];
   requiredEntryPoints: EntryPointRow[];
   keyCodeReferences: CodeReferenceRow[];
   relatedProductCapabilities: FeatureRow[];
@@ -405,6 +547,75 @@ export type ProgrammingContextResult = {
   acceptanceCriteria: string[];
   verification: string[];
   qualityIssues: QualityIssue[];
+};
+
+export type ProgrammingNextAction = {
+  priority: 'high' | 'medium' | 'low';
+  source: 'focus' | 'seed_path' | 'gap' | 'quality' | 'verification';
+  title: string;
+  detail: string;
+  targetType: string;
+  targetId: string;
+};
+
+export type FeatureDossierResult = {
+  project: ProjectRow;
+  focus: {
+    feature: FeatureRow;
+    map: FeatureMapRow;
+  };
+  canonicalFeature: FeatureRow;
+  canonicalMap: FeatureMapRow;
+  statusMatrix: CapabilityMatrixResult | null;
+  implementationSlices: CapabilityStatusRow[];
+  gaps: CapabilityGapRow[];
+  evidence: EvidenceRow[];
+  codeReferences: CodeReferenceRow[];
+  entryPoints: EntryPointRow[];
+  alignments: AlignmentRow[];
+  relatedFeatures: FeatureRow[];
+  selectedFocus: FeatureFocusRow | null;
+  focuses: FeatureFocusRow[];
+  qualityIssues: QualityIssue[];
+  summary: {
+    isCanonical: boolean;
+    statusCounts: Record<string, number>;
+    evidenceSourceCounts: Record<string, number>;
+    openGapCount: number;
+    highSeverityGapCount: number;
+    codeReferenceCount: number;
+    entryPointCount: number;
+    alignmentCount: number;
+    relatedFeatureCount: number;
+    openFocusCount: number;
+  };
+};
+
+export type FeatureDossierUpsertResult = {
+  success: boolean;
+  dryRun: boolean;
+  rolledBack: boolean;
+  operations: {
+    maps: UpsertResult<FeatureMapRow>[];
+    features: UpsertResult<FeatureRow>[];
+    entryPoints: UpsertResult<EntryPointRow>[];
+    codeReferences: UpsertResult<CodeReferenceRow>[];
+    evidence: UpsertResult<EvidenceRow>[];
+    statuses: UpsertResult<CapabilityStatusRow>[];
+    gaps: UpsertResult<CapabilityGapRow>[];
+    alignments: UpsertResult<AlignmentRow>[];
+  };
+  dossier: FeatureDossierResult;
+};
+
+export type FeatureFocusStartResult = {
+  success: boolean;
+  dryRun: boolean;
+  rolledBack: boolean;
+  map: UpsertResult<FeatureMapRow>;
+  feature: UpsertResult<FeatureRow>;
+  focus: UpsertResult<FeatureFocusRow>;
+  dossier: FeatureDossierResult;
 };
 
 export type CapabilityMatrixResult = {
@@ -451,6 +662,9 @@ export type QualityReportResult = {
 };
 
 type ParsedQueryContext = ReturnType<typeof QueryContextSchema.parse>;
+type ParsedSearchFeatures = ReturnType<typeof SearchFeaturesSchema.parse>;
+type ParsedQualityReport = ReturnType<typeof QualityReportSchema.parse>;
+type ParsedFeatureReadiness = ReturnType<typeof FeatureReadinessSchema.parse>;
 
 export class FuncTreeRepository {
   constructor(private readonly db: Db) {}
@@ -1456,6 +1670,274 @@ export class FuncTreeRepository {
     return this.runBatch(data.dryRun, data.items, (item) => this.upsertCapabilityGap(data.projectId, { ...item, dryRun: data.dryRun }));
   }
 
+  startFeatureFocus(input: StartFeatureFocusInput): FeatureFocusStartResult {
+    const data = StartFeatureFocusSchema.parse(input);
+    this.getProject(data.projectId);
+    let result: FeatureFocusStartResult | null = null;
+    const execute = () => {
+      result = this.writeFeatureFocusStart(data);
+      return result;
+    };
+
+    if (data.dryRun) {
+      try {
+        this.withSavepoint('feature_focus_start_preview', () => {
+          execute();
+          throw new DryRunRollbackError();
+        });
+      } catch (error) {
+        if (!(error instanceof DryRunRollbackError)) {
+          throw error;
+        }
+      }
+      if (!result) {
+        throw new ValidationError('功能焦点启动 dry-run 失败，未生成预览结果。');
+      }
+      return markFeatureFocusStartDryRun(result);
+    }
+
+    return this.withSavepoint('feature_focus_start', execute);
+  }
+
+  upsertFeatureFocus(projectId: string, input: CreateFeatureFocusInput): UpsertResult<FeatureFocusRow> {
+    const data = CreateFeatureFocusSchema.parse(input);
+    if (data.projectId && data.projectId !== projectId) {
+      throw new ValidationError('projectId 与路径项目不一致。');
+    }
+    this.getProject(projectId);
+    const feature = this.resolveFeatureFocusFeature(projectId, data);
+    const targetMapIds = unique(data.targetMaps.map((item) => this.resolveOptionalMapId(projectId, item.mapId, item.mapStableKey)).filter(isString));
+    const relatedFeatureIds = unique(data.relatedFeatures.map((item) => this.resolveFeatureFocusFeature(projectId, item).id));
+    const stableKey = data.stableKey ?? featureFocusStableKey(feature, data.title);
+    const now = nowIso();
+    const existing = this.findFeatureFocusForUpsert(projectId, data.id, stableKey);
+    const id = existing?.id ?? data.id ?? (data.dryRun ? previewId('focus') : newId('focus'));
+    const planned = {
+      id,
+      projectId,
+      stableKey,
+      featureId: feature.id,
+      title: data.title,
+      mode: data.mode,
+      status: data.status,
+      priority: data.priority,
+      sourceType: data.sourceType,
+      question: data.question,
+      scope: data.scope,
+      sourceRefs: data.sourceRefs,
+      seedPaths: data.seedPaths,
+      targetMapIds,
+      relatedFeatureIds,
+      nextSteps: data.nextSteps,
+      findings: data.findings,
+      confidence: data.confidence,
+      metadata: data.metadata,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    } satisfies FeatureFocusRow;
+    const changedFields = existing
+      ? changedFieldsFor(existing, planned, [
+          'stableKey',
+          'featureId',
+          'title',
+          'mode',
+          'status',
+          'priority',
+          'sourceType',
+          'question',
+          'scope',
+          'sourceRefs',
+          'seedPaths',
+          'targetMapIds',
+          'relatedFeatureIds',
+          'nextSteps',
+          'findings',
+          'confidence',
+          'metadata'
+        ])
+      : [];
+    if (data.dryRun) {
+      return { operation: 'dry_run', changedFields: existing ? changedFields : ['*'], data: this.enrichFeatureFocus(planned), dryRun: true, previewId: existing ? undefined : id };
+    }
+    if (existing && changedFields.length === 0) {
+      return { operation: 'unchanged', changedFields, data: existing, dryRun: false };
+    }
+    this.db
+      .prepare(
+        `INSERT INTO feature_focuses
+          (id, project_id, stable_key, feature_id, title, mode, status, priority, source_type, question, scope, source_refs_json, seed_paths_json, target_map_ids_json, related_feature_ids_json, next_steps_json, findings, confidence, metadata_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           stable_key = excluded.stable_key,
+           feature_id = excluded.feature_id,
+           title = excluded.title,
+           mode = excluded.mode,
+           status = excluded.status,
+           priority = excluded.priority,
+           source_type = excluded.source_type,
+           question = excluded.question,
+           scope = excluded.scope,
+           source_refs_json = excluded.source_refs_json,
+           seed_paths_json = excluded.seed_paths_json,
+           target_map_ids_json = excluded.target_map_ids_json,
+           related_feature_ids_json = excluded.related_feature_ids_json,
+           next_steps_json = excluded.next_steps_json,
+           findings = excluded.findings,
+           confidence = excluded.confidence,
+           metadata_json = excluded.metadata_json,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        id,
+        projectId,
+        planned.stableKey,
+        planned.featureId,
+        planned.title,
+        planned.mode,
+        planned.status,
+        planned.priority,
+        planned.sourceType,
+        planned.question,
+        planned.scope,
+        jsonArray(planned.sourceRefs),
+        jsonArray(planned.seedPaths),
+        jsonArray(planned.targetMapIds),
+        jsonArray(planned.relatedFeatureIds),
+        jsonArray(planned.nextSteps),
+        planned.findings,
+        planned.confidence,
+        json(planned.metadata),
+        now,
+        now
+      );
+    this.touchProject(projectId);
+    this.recordEvent(projectId, 'http', 'upsert_feature_focus', { id, featureId: feature.id, stableKey, status: data.status });
+    return {
+      operation: existing ? 'updated' : 'created',
+      changedFields,
+      data: this.getFeatureFocus(id),
+      dryRun: false
+    };
+  }
+
+  getFeatureFocus(focusId: string): FeatureFocusRow {
+    const row = this.db.prepare('SELECT * FROM feature_focuses WHERE id = ?').get(focusId);
+    if (!row) {
+      throw new NotFoundError(`功能焦点不存在: ${focusId}`);
+    }
+    return this.enrichFeatureFocus(mapFeatureFocus(row));
+  }
+
+  listFeatureFocuses(input: QueryFeatureFocusesInput): FeatureFocusRow[] {
+    const data = QueryFeatureFocusesSchema.parse(input);
+    this.getProject(data.projectId);
+    const resolvedMapId = data.mapId || data.mapStableKey ? this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined : undefined;
+    const where = ['ff.project_id = ?'];
+    const args: SQLInputValue[] = [data.projectId];
+    if (data.focusId) {
+      where.push('ff.id = ?');
+      args.push(data.focusId);
+    }
+    if (data.focusStableKey) {
+      where.push('ff.stable_key = ?');
+      args.push(data.focusStableKey);
+    }
+    if (data.featureId || data.featureStableKey) {
+      const feature = data.featureId ? this.getFeature(data.featureId) : this.resolveFeatureByStableKey(data.projectId, data.featureStableKey ?? '', data.featureVersion, resolvedMapId);
+      if (feature.projectId !== data.projectId) {
+        throw new ValidationError('功能不属于当前项目。');
+      }
+      if (resolvedMapId && feature.mapId !== resolvedMapId) {
+        throw new ValidationError('功能不属于指定功能地图。');
+      }
+      where.push('ff.feature_id = ?');
+      args.push(feature.id);
+    } else if (resolvedMapId) {
+      where.push('f.map_id = ?');
+      args.push(resolvedMapId);
+    }
+    if (data.mode) {
+      where.push('ff.mode = ?');
+      args.push(data.mode);
+    }
+    if (data.status) {
+      where.push('ff.status = ?');
+      args.push(data.status);
+    } else if (!data.includeArchived) {
+      where.push("ff.status <> 'archived'");
+    }
+    if (data.priority) {
+      where.push('ff.priority = ?');
+      args.push(data.priority);
+    }
+    if (data.sourceType) {
+      where.push('ff.source_type = ?');
+      args.push(data.sourceType);
+    }
+    appendSearchExpressionsClause(
+      where,
+      args,
+      [
+        'ff.id',
+        'ff.stable_key',
+        'ff.title',
+        'ff.mode',
+        'ff.status',
+        'ff.priority',
+        'ff.source_type',
+        'ff.question',
+        'ff.scope',
+        'ff.findings',
+        'f.id',
+        'f.stable_key',
+        'f.name',
+        'f.description'
+      ],
+      data.keyword
+    );
+    return this.db
+      .prepare(
+        `SELECT ff.* FROM feature_focuses ff
+         JOIN features f ON f.id = ff.feature_id
+         WHERE ${where.join(' AND ')}
+         ORDER BY CASE ff.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                  CASE ff.status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 WHEN 'ready_for_implementation' THEN 2 ELSE 3 END,
+                  ff.updated_at DESC
+         LIMIT ?`
+      )
+      .all(...args, data.limit)
+      .map((row) => this.enrichFeatureFocus(mapFeatureFocus(row)));
+  }
+
+  upsertFeatureDossier(input: UpsertFeatureDossierInput): FeatureDossierUpsertResult {
+    const data = UpsertFeatureDossierSchema.parse(input);
+    this.getProject(data.projectId);
+    let result: FeatureDossierUpsertResult | null = null;
+    const execute = () => {
+      result = this.writeFeatureDossier(data);
+      return result;
+    };
+
+    if (data.dryRun) {
+      try {
+        this.withSavepoint('feature_dossier_preview', () => {
+          execute();
+          throw new DryRunRollbackError();
+        });
+      } catch (error) {
+        if (!(error instanceof DryRunRollbackError)) {
+          throw error;
+        }
+      }
+      if (!result) {
+        throw new ValidationError('功能档案 dry-run 失败，未生成预览结果。');
+      }
+      return markFeatureDossierDryRun(result);
+    }
+
+    return this.withSavepoint('feature_dossier', execute);
+  }
+
   getCapabilityStatus(statusId: string): CapabilityStatusRow {
     const row = this.db.prepare('SELECT * FROM capability_statuses WHERE id = ?').get(statusId);
     if (!row) {
@@ -1530,12 +2012,13 @@ export class FuncTreeRepository {
     const query = QueryContextSchema.parse(input);
     const resolvedMapId = this.resolveQueryMapId(query);
     const resolvedQuery = { ...query, mapId: resolvedMapId ?? query.mapId } satisfies ParsedQueryContext;
-    const types = new Set<QueryContextType>(query.types ?? ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence']);
+    const types = new Set<QueryContextType>(query.types ?? ['project', 'map', 'feature', 'feature_focus', 'alignment', 'entry_point', 'code_reference', 'evidence']);
     const offset = parseCursor(query.cursor) ?? query.offset;
     const limit = query.limit;
     const projects = query.includeSummaryOnly || !types.has('project') ? [] : this.queryProjects(resolvedQuery, limit, offset);
     const maps = query.includeSummaryOnly || !types.has('map') ? [] : this.queryMaps(resolvedQuery, limit, offset);
     const features = query.includeSummaryOnly || !types.has('feature') ? [] : this.queryFeatures(resolvedQuery, limit, offset, query.includeDetails);
+    const featureFocuses = query.includeSummaryOnly || !types.has('feature_focus') ? [] : this.queryFeatureFocuses(resolvedQuery, limit, offset);
     const alignments = query.includeSummaryOnly || !types.has('alignment') ? [] : this.queryAlignments(resolvedQuery, limit, offset, query.includeMembers);
     const entryPoints = query.includeSummaryOnly || !types.has('entry_point') ? [] : this.queryEntryPoints(resolvedQuery, limit, offset);
     const codeReferences = query.includeSummaryOnly || !types.has('code_reference') ? [] : this.queryCodeReferences(resolvedQuery, limit, offset);
@@ -1544,6 +2027,7 @@ export class FuncTreeRepository {
       project: types.has('project') ? this.countProjects(resolvedQuery) : 0,
       map: types.has('map') ? this.countMaps(resolvedQuery) : 0,
       feature: types.has('feature') ? this.countFeatures(resolvedQuery) : 0,
+      feature_focus: types.has('feature_focus') ? this.countFeatureFocuses(resolvedQuery) : 0,
       alignment: types.has('alignment') ? this.countAlignments(resolvedQuery) : 0,
       entry_point: types.has('entry_point') ? this.countEntryPoints(resolvedQuery) : 0,
       code_reference: types.has('code_reference') ? this.countCodeReferences(resolvedQuery) : 0,
@@ -1555,6 +2039,7 @@ export class FuncTreeRepository {
       projects: presentRows('project', projects, query.view, query.includeMetadata),
       maps: presentRows('map', maps, query.view, query.includeMetadata),
       features: presentRows('feature', features, query.view, query.includeMetadata),
+      featureFocuses: presentRows('feature_focus', featureFocuses, query.view, query.includeMetadata),
       alignments: presentRows('alignment', alignments, query.view, query.includeMetadata),
       entryPoints: presentRows('entry_point', entryPoints, query.view, query.includeMetadata),
       codeReferences: presentRows('code_reference', codeReferences, query.view, query.includeMetadata),
@@ -1570,6 +2055,133 @@ export class FuncTreeRepository {
     };
   }
 
+  searchFeatures(input: SearchFeaturesInput): FeatureSearchResult {
+    const data = SearchFeaturesSchema.parse(input);
+    const project = this.getProject(data.projectId);
+    const mapId = data.mapId || data.mapStableKey ? this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined : undefined;
+    const query = data.query.trim();
+    const pathValue = data.path?.trim() ?? '';
+    const rows = this.queryFeatureSearchRows(data, mapId, Math.max(data.limit * 8, 80));
+    const terms = featureSearchTerms(query);
+    const candidates = rows
+      .map((row) => {
+        const feature = this.attachFeatureDetails(mapFeature(row), data.includeDetails);
+        const featureMap = this.getMap(feature.mapId);
+        const references = this.codeReferencesForFeatures(data.projectId, [feature.id]);
+        const matchingCodeReferences = references.filter((reference) => codeReferenceMatchesSearch(reference, query, terms, pathValue, data.pathMode)).slice(0, 3);
+        const openFocuses = this.listFeatureFocuses({ projectId: data.projectId, featureId: feature.id, limit: 5 }).filter((focus) => !['implemented', 'closed', 'archived'].includes(focus.status)).slice(0, 3);
+        const openGaps = this.openGapsForFeature(data.projectId, feature.id).slice(0, 3);
+        const alignments = this.findAlignmentsForTargets(data.projectId, new Set([`feature:${feature.id}`, ...references.map((reference) => `code_reference:${reference.id}`)]));
+        const score = scoreFeatureSearchCandidate(feature, featureMap, matchingCodeReferences, openFocuses, openGaps, query, terms, pathValue, data.pathMode);
+        return {
+          feature,
+          map: featureMap,
+          score: score.score,
+          reasons: score.reasons,
+          openFocuses,
+          codeReferenceCount: references.length,
+          matchingCodeReferences,
+          gapCount: openGaps.length,
+          openGaps,
+          alignmentCount: alignments.length,
+          nextAction: featureSearchNextAction(openFocuses, matchingCodeReferences, openGaps)
+        } satisfies FeatureSearchCandidate;
+      })
+      .filter((candidate) => candidate.score > 0)
+      .sort((left, right) => right.score - left.score || axisRank(left.map.axis) - axisRank(right.map.axis) || left.feature.name.localeCompare(right.feature.name))
+      .slice(0, data.limit);
+    const exactStableKeyMatches = candidates.filter((candidate) => candidate.feature.stableKey.toLowerCase() === query.toLowerCase()).length;
+    const suggestedStart = candidates[0]?.score && candidates[0].score >= 50 ? null : this.suggestFeatureSearchStart(data.projectId, query, candidates[0]);
+
+    return {
+      project,
+      query,
+      path: pathValue,
+      candidates,
+      suggestedStart,
+      page: {
+        limit: data.limit,
+        candidateCount: candidates.length
+      },
+      summary: {
+        openFocusCount: candidates.reduce((count, candidate) => count + candidate.openFocuses.length, 0),
+        exactStableKeyMatches,
+        codeReferenceMatches: candidates.reduce((count, candidate) => count + candidate.matchingCodeReferences.length, 0)
+      }
+    };
+  }
+
+  prepareFeatureWork(input: PrepareFeatureWorkInput): PreparedFeatureWorkResult {
+    const data = PrepareFeatureWorkSchema.parse(input);
+    const project = this.getProject(data.projectId);
+    let search: FeatureSearchResult | null = null;
+    let selectedCandidate: FeatureSearchCandidate | null = null;
+    let selectedFocus: FeatureFocusRow | null = null;
+    let suggestedStart: FeatureSearchResult['suggestedStart'] = null;
+    if (data.focusId || data.focusStableKey) {
+      selectedFocus = data.focusId ? this.getFeatureFocus(data.focusId) : this.findFeatureFocusByStableKey(data.projectId, data.focusStableKey ?? '');
+      if (!selectedFocus) {
+        throw new NotFoundError(`功能焦点不存在: ${data.focusStableKey}`);
+      }
+      if (selectedFocus.projectId !== data.projectId) {
+        throw new ValidationError('功能焦点不属于当前项目。');
+      }
+      const feature = this.getFeature(selectedFocus.featureId, true);
+      selectedCandidate = this.featureSearchCandidateForFeature(data.projectId, feature, 100, ['直接指定功能焦点']);
+    } else if (data.featureId || data.featureStableKey) {
+      const mapId = data.mapId || data.mapStableKey ? this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined : undefined;
+      const feature = data.featureId ? this.getFeature(data.featureId, true) : this.resolveFeatureByStableKey(data.projectId, data.featureStableKey ?? '', data.featureVersion, mapId);
+      selectedCandidate = this.featureSearchCandidateForFeature(data.projectId, this.getFeature(feature.id, true), 100, ['直接指定功能']);
+    } else {
+      search = this.searchFeatures({
+        projectId: data.projectId,
+        query: data.query,
+        path: data.path,
+        pathMode: data.pathMode,
+        mapId: data.mapId,
+        mapStableKey: data.mapStableKey,
+        axes: data.axes,
+        statuses: data.statuses,
+        includeArchived: data.includeArchived,
+        includeDetails: true,
+        limit: data.limit
+      });
+      const firstCandidate = search.candidates[0] ?? null;
+      if (firstCandidate && firstCandidate.score >= data.minCandidateScore) {
+        selectedCandidate = firstCandidate;
+      } else {
+        suggestedStart = search.suggestedStart;
+        return {
+          project,
+          readiness: firstCandidate ? 'ambiguous' : 'needs_start',
+          search,
+          selectedCandidate: firstCandidate,
+          selectedFocus: null,
+          dossier: null,
+          programmingContext: null,
+          suggestedStart,
+          nextSteps: preparedFeatureFallbackSteps(firstCandidate, suggestedStart),
+          recommendedToolCalls: preparedFeatureFallbackToolCalls(data.projectId, firstCandidate, suggestedStart, data.depth)
+        };
+      }
+    }
+    const focusReference = selectedFocus ? { focusId: selectedFocus.id } : { featureId: selectedCandidate.feature.id };
+    const dossier = this.featureDossier({ projectId: data.projectId, ...focusReference, depth: data.depth });
+    const programmingContext = this.programmingContext({ projectId: data.projectId, ...focusReference, depth: data.depth });
+    return {
+      project,
+      readiness: 'ready',
+      search,
+      selectedCandidate,
+      selectedFocus,
+      dossier,
+      programmingContext,
+      suggestedStart: null,
+      nextSteps: preparedFeatureNextSteps(selectedCandidate, dossier, programmingContext, selectedFocus),
+      recommendedToolCalls: preparedFeatureToolCalls(data.projectId, selectedCandidate, selectedFocus, data.depth)
+    };
+  }
+
   overview() {
     const projects = this.listProjects();
     return {
@@ -1581,6 +2193,8 @@ export class FuncTreeRepository {
         entryPoints: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM entry_points').get()),
         codeReferences: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM code_references').get()),
         alignments: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM alignments').get()),
+        featureFocuses: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM feature_focuses').get()),
+        openFeatureFocuses: scalarCount(this.db.prepare("SELECT COUNT(*) AS count FROM feature_focuses WHERE status NOT IN ('implemented', 'closed', 'archived')").get()),
         scanRuns: scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM scan_runs').get())
       }
     };
@@ -1739,8 +2353,8 @@ export class FuncTreeRepository {
   programmingContext(input: ProgrammingContextInput): ProgrammingContextResult {
     const data = ProgrammingContextSchema.parse(input);
     const project = this.getProject(data.projectId);
-    const mapId = data.mapId || data.mapStableKey ? this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined : undefined;
-    const feature = data.featureId ? this.getFeature(data.featureId, true) : this.resolveFeatureByStableKey(data.projectId, data.featureStableKey ?? '', data.featureVersion, mapId);
+    const resolvedFocus = this.resolveFocusedFeature(data.projectId, data);
+    const feature = resolvedFocus.feature;
     if (feature.projectId !== data.projectId) {
       throw new ValidationError('功能不属于当前项目。');
     }
@@ -1758,13 +2372,24 @@ export class FuncTreeRepository {
     const evidence = include.has('evidence') ? this.evidenceForTargets(data.projectId, new Set([`feature:${feature.id}`, ...allReferences.map((reference) => `code_reference:${reference.id}`), ...alignments.map((alignment) => `alignment:${alignment.id}`)])) : [];
     const detail = featureWithDetails.details ?? null;
     const capabilityMatrix = include.has('statusMatrix') || include.has('gaps') ? this.capabilityMatrix({ projectId: data.projectId, canonicalFeatureId: feature.id, includeGaps: include.has('gaps'), includeEvidence: include.has('evidence') }) : null;
+    const capabilityGaps = include.has('gaps') ? capabilityMatrix?.gaps ?? [] : [];
+    const focuses = include.has('focuses')
+      ? uniqueById([resolvedFocus.selectedFocus, ...this.listFeatureFocuses({ projectId: data.projectId, featureId: feature.id, includeArchived: Boolean(resolvedFocus.selectedFocus), limit: 20 })].filter(isNonNull))
+      : [];
+    const actionFocuses = uniqueById([resolvedFocus.selectedFocus, ...focuses].filter(isNonNull));
+    const seedPathContexts = include.has('seedPathContexts') ? this.seedPathContexts(data.projectId, actionFocuses, include) : [];
     const qualityIssues = include.has('quality') ? this.qualityIssuesForFeature(data.projectId, featureWithDetails, detail, allReferences, alignments, evidence, undefined) : [];
+    const verification = allReferences.map((reference) => reference.verificationHint).filter(isString);
 
     return {
       project,
       map: featureMap,
       feature: featureWithDetails,
       details: include.has('details') ? detail : null,
+      selectedFocus: resolvedFocus.selectedFocus,
+      focuses,
+      seedPathContexts,
+      nextActions: programmingNextActions(feature.id, actionFocuses, capabilityGaps, qualityIssues, verification),
       requiredEntryPoints: allEntryPoints,
       keyCodeReferences: allReferences,
       relatedProductCapabilities: impactedFeatures.filter((item) => item.id !== feature.id && this.getMap(item.mapId).axis === 'product'),
@@ -1772,18 +2397,142 @@ export class FuncTreeRepository {
       impactedFeatures: impactedFeatures.filter((item) => item.id !== feature.id),
       evidence,
       capabilityMatrix: include.has('statusMatrix') ? capabilityMatrix : null,
-      capabilityGaps: include.has('gaps') ? capabilityMatrix?.gaps ?? [] : [],
+      capabilityGaps,
       risks: include.has('risks') ? detail?.risks ?? [] : [],
       acceptanceCriteria: include.has('acceptanceCriteria') ? detail?.acceptanceCriteria ?? [] : [],
-      verification: allReferences.map((reference) => reference.verificationHint).filter(isString),
+      verification,
       qualityIssues
+    };
+  }
+
+  featureDossier(input: FeatureDossierInput): FeatureDossierResult {
+    const data = FeatureDossierSchema.parse(input);
+    const project = this.getProject(data.projectId);
+    const resolvedFocus = this.resolveFocusedFeature(data.projectId, data);
+    const focus = resolvedFocus.feature;
+    if (focus.projectId !== data.projectId) {
+      throw new ValidationError('功能不属于当前项目。');
+    }
+    const focusFeature = this.getFeature(focus.id, true);
+    const focusMap = this.getMap(focusFeature.mapId);
+    const canonicalFeature = this.canonicalFeatureForDossier(data.projectId, focusFeature);
+    const canonicalMap = this.getMap(canonicalFeature.mapId);
+    const include = new Set(data.include);
+    const programmingIncludes = [
+      include.has('entryPoints') ? 'entryPoints' : null,
+      include.has('codeReferences') ? 'codeReferences' : null,
+      include.has('alignments') ? 'alignments' : null,
+      include.has('evidence') ? 'evidence' : null,
+      include.has('details') ? 'details' : null,
+      include.has('quality') ? 'quality' : null,
+      'risks',
+      'acceptanceCriteria'
+    ].filter(isString) as ProgrammingContextInput['include'];
+    const programmingContext = this.programmingContext({
+      projectId: data.projectId,
+      featureId: focusFeature.id,
+      depth: data.depth,
+      include: programmingIncludes
+    });
+    const statusMatrix =
+      include.has('statusMatrix') || include.has('gaps') || include.has('evidence')
+        ? this.capabilityMatrix({
+            projectId: data.projectId,
+            canonicalFeatureId: canonicalFeature.id,
+            includeGaps: include.has('gaps'),
+            includeEvidence: include.has('evidence')
+          })
+        : null;
+    const evidence = include.has('evidence') ? uniqueById([...programmingContext.evidence, ...(statusMatrix?.evidence ?? [])]) : [];
+    const gaps = include.has('gaps') ? statusMatrix?.gaps ?? [] : [];
+    const implementationSlices = include.has('statusMatrix') ? statusMatrix?.statuses ?? [] : [];
+    const relatedFeatures = include.has('relatedFeatures')
+      ? uniqueById([canonicalFeature.id === focusFeature.id ? null : canonicalFeature, ...programmingContext.impactedFeatures].filter(isNonNull))
+      : [];
+    const codeReferences = include.has('codeReferences') ? programmingContext.keyCodeReferences : [];
+    const entryPoints = include.has('entryPoints') ? programmingContext.requiredEntryPoints : [];
+    const alignments = include.has('alignments') ? programmingContext.alignments : [];
+    const focuses = include.has('focuses')
+      ? uniqueById([resolvedFocus.selectedFocus, ...this.listFeatureFocuses({ projectId: data.projectId, featureId: focusFeature.id, includeArchived: Boolean(resolvedFocus.selectedFocus), limit: 20 })].filter(isNonNull))
+      : [];
+    const qualityIssues = include.has('quality') ? programmingContext.qualityIssues : [];
+
+    return {
+      project,
+      focus: {
+        feature: include.has('details') ? focusFeature : { ...focusFeature, details: undefined },
+        map: focusMap
+      },
+      canonicalFeature: include.has('details') ? this.getFeature(canonicalFeature.id, true) : canonicalFeature,
+      canonicalMap,
+      statusMatrix: include.has('statusMatrix') ? statusMatrix : null,
+      implementationSlices,
+      gaps,
+      evidence,
+      codeReferences,
+      entryPoints,
+      alignments,
+      relatedFeatures,
+      selectedFocus: resolvedFocus.selectedFocus,
+      focuses,
+      qualityIssues,
+      summary: {
+        isCanonical: focusFeature.id === canonicalFeature.id,
+        statusCounts: countBy(implementationSlices, (status) => status.status),
+        evidenceSourceCounts: countBy(evidence, (item) => item.sourceType),
+        openGapCount: gaps.filter((gap) => gap.status === 'open').length,
+        highSeverityGapCount: gaps.filter((gap) => gap.status === 'open' && gap.severity === 'high').length,
+        codeReferenceCount: codeReferences.length,
+        entryPointCount: entryPoints.length,
+        alignmentCount: alignments.length,
+        relatedFeatureCount: relatedFeatures.length,
+        openFocusCount: focuses.filter((focus) => !['implemented', 'closed', 'archived'].includes(focus.status)).length
+      }
+    };
+  }
+
+  featureReadiness(input: FeatureReadinessInput): FeatureReadinessResult {
+    const data = FeatureReadinessSchema.parse(input);
+    const reference = featureReadinessReference(data);
+    const dossier = this.featureDossier({
+      projectId: data.projectId,
+      ...reference,
+      depth: 2,
+      include: ['focuses', 'details', 'codeReferences', 'entryPoints', 'alignments', 'evidence', 'statusMatrix', 'gaps', 'relatedFeatures', 'quality']
+    });
+    const qualityReport = this.qualityReport({ projectId: data.projectId, ...reference });
+    const requiredAxes = featureReadinessAxes(data, dossier);
+    const axisCoverage = requiredAxes.map((axis) => featureReadinessAxisCoverage(axis, dossier));
+    const checks = featureReadinessChecks(dossier, qualityReport, axisCoverage);
+    const readiness = featureReadinessStatus(dossier, checks);
+    const score = featureReadinessScore(checks);
+    const missingAxes = axisCoverage.filter((item) => item.status === 'missing').map((item) => item.axis);
+
+    return {
+      project: dossier.project,
+      map: dossier.focus.map,
+      feature: dossier.focus.feature,
+      selectedFocus: dossier.selectedFocus,
+      readiness,
+      score,
+      requiredAxes,
+      axisCoverage,
+      checks,
+      missingAxes,
+      nextSteps: featureReadinessNextSteps(dossier, qualityReport, checks, missingAxes),
+      recommendedToolCalls: featureReadinessToolCalls(data.projectId, dossier, readiness),
+      dossier,
+      qualityReport
     };
   }
 
   qualityReport(input: QualityReportInput): QualityReportResult {
     const data = QualityReportSchema.parse(input);
     this.getProject(data.projectId);
-    const features = this.listFeatures(data.projectId).map((feature) => this.attachFeatureDetails(feature, true));
+    const features = this.qualityReportFeatures(data);
+    const featureIds = new Set(features.map((feature) => feature.id));
+    const mapId = data.mapId || data.mapStableKey ? this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey) ?? undefined : undefined;
+    const scopedQualityReport = isScopedQualityReport(data);
     const referencesByFeature = groupBy(this.listCodeReferences(data.projectId).filter((reference) => reference.featureId), (reference) => reference.featureId ?? '');
     const alignments = this.listAlignments(data.projectId);
     const alignmentsByFeature = new Map<string, AlignmentRow[]>();
@@ -1807,7 +2556,15 @@ export class FuncTreeRepository {
     let blockedDetailGaps = 0;
     let deprecatedDetailGaps = 0;
     let mockBoundaryGaps = 0;
-    const capabilityGaps = this.listCapabilityGaps(data.projectId, {});
+    const capabilityGaps = this.listCapabilityGaps(data.projectId, {}).filter((gap) => {
+      const matchesMap = !mapId || gap.mapId === mapId || gap.ownerMapId === mapId;
+      const matchesFeature =
+        !scopedQualityReport ||
+        featureIds.has(gap.canonicalFeatureId) ||
+        (gap.featureId ? featureIds.has(gap.featureId) : false) ||
+        (Boolean(mapId) && matchesMap);
+      return matchesFeature && matchesMap;
+    });
     const openCapabilityGaps = capabilityGaps.filter((gap) => gap.status === 'open').length;
     const highSeverityCapabilityGaps = capabilityGaps.filter((gap) => gap.status === 'open' && gap.severity === 'high').length;
 
@@ -1833,6 +2590,9 @@ export class FuncTreeRepository {
     let missingPaths = 0;
     if (data.repoRoot && data.includePathChecks) {
       for (const reference of this.listCodeReferences(data.projectId)) {
+        if (scopedQualityReport && reference.featureId && !featureIds.has(reference.featureId)) continue;
+        if (scopedQualityReport && !reference.featureId && mapId && reference.mapId !== mapId) continue;
+        if (scopedQualityReport && !reference.featureId && !mapId) continue;
         if (!fs.existsSync(path.resolve(data.repoRoot, reference.path))) {
           missingPaths += 1;
           issues.push({
@@ -1866,6 +2626,20 @@ export class FuncTreeRepository {
       },
       issues
     };
+  }
+
+  private qualityReportFeatures(data: ParsedQualityReport): FeatureRow[] {
+    if (data.focusId || data.focusStableKey || data.featureId || data.featureStableKey) {
+      return [this.resolveFocusedFeature(data.projectId, data).feature].map((feature) => this.attachFeatureDetails(feature, true));
+    }
+    if (data.mapId || data.mapStableKey) {
+      const mapId = this.resolveOptionalMapId(data.projectId, data.mapId, data.mapStableKey);
+      if (!mapId) return [];
+      return this.listFeatures(data.projectId)
+        .filter((feature) => feature.mapId === mapId)
+        .map((feature) => this.attachFeatureDetails(feature, true));
+    }
+    return this.listFeatures(data.projectId).map((feature) => this.attachFeatureDetails(feature, true));
   }
 
   private attachFeatureDetails(feature: FeatureRow, includeDetails: boolean): FeatureRow {
@@ -2081,6 +2855,222 @@ export class FuncTreeRepository {
     }
   }
 
+  private writeFeatureDossier(data: ReturnType<typeof UpsertFeatureDossierSchema.parse>): FeatureDossierUpsertResult {
+    const operations: FeatureDossierUpsertResult['operations'] = {
+      maps: [],
+      features: [],
+      entryPoints: [],
+      codeReferences: [],
+      evidence: [],
+      statuses: [],
+      gaps: [],
+      alignments: []
+    };
+
+    const canonicalMap = this.upsertMap(data.projectId, { ...data.canonicalMap, dryRun: false });
+    operations.maps.push(canonicalMap);
+    const canonicalFeature = this.upsertFeature(canonicalMap.data.id, { ...data.canonicalFeature, mapId: canonicalMap.data.id, dryRun: false });
+    operations.features.push(canonicalFeature);
+
+    for (const evidence of data.canonicalEvidence) {
+      const { target: _target, ...evidenceInput } = evidence;
+      operations.evidence.push(
+        this.upsertEvidence(data.projectId, {
+          ...evidenceInput,
+          targetType: 'feature',
+          targetId: canonicalFeature.data.id,
+          dryRun: false
+        })
+      );
+    }
+
+    for (const slice of data.implementationSlices) {
+      const map = this.upsertMap(data.projectId, { ...slice.map, dryRun: false });
+      operations.maps.push(map);
+      const feature = slice.feature ? this.upsertFeature(map.data.id, { ...slice.feature, mapId: map.data.id, dryRun: false }) : null;
+      if (feature) {
+        operations.features.push(feature);
+      }
+
+      const statusEvidenceIds: string[] = [];
+      const deferredStatusEvidence: typeof slice.evidence = [];
+      for (const evidence of slice.evidence) {
+        if (evidence.target === 'status' || (evidence.target === 'implementation_feature' && !feature)) {
+          deferredStatusEvidence.push(evidence);
+          continue;
+        }
+        const { target, ...evidenceInput } = evidence;
+        const targetId = target === 'canonical_feature' ? canonicalFeature.data.id : feature?.data.id ?? canonicalFeature.data.id;
+        const evidenceResult = this.upsertEvidence(data.projectId, {
+          ...evidenceInput,
+          targetType: 'feature',
+          targetId,
+          dryRun: false
+        });
+        operations.evidence.push(evidenceResult);
+        statusEvidenceIds.push(evidenceResult.data.id);
+      }
+
+      let status = this.upsertCapabilityStatus(data.projectId, {
+        canonicalFeatureId: canonicalFeature.data.id,
+        mapId: map.data.id,
+        featureId: feature?.data.id,
+        status: slice.status,
+        summary: slice.summary,
+        gaps: slice.gaps,
+        recommendedAction: slice.recommendedAction,
+        evidenceIds: statusEvidenceIds,
+        dryRun: false
+      });
+      operations.statuses.push(status);
+
+      if (deferredStatusEvidence.length > 0) {
+        for (const evidence of deferredStatusEvidence) {
+          const { target: _target, ...evidenceInput } = evidence;
+          const evidenceResult = this.upsertEvidence(data.projectId, {
+            ...evidenceInput,
+            targetType: 'capability_status',
+            targetId: status.data.id,
+            dryRun: false
+          });
+          operations.evidence.push(evidenceResult);
+          statusEvidenceIds.push(evidenceResult.data.id);
+        }
+        status = this.upsertCapabilityStatus(data.projectId, {
+          canonicalFeatureId: canonicalFeature.data.id,
+          mapId: map.data.id,
+          featureId: feature?.data.id,
+          status: slice.status,
+          summary: slice.summary,
+          gaps: slice.gaps,
+          recommendedAction: slice.recommendedAction,
+          evidenceIds: unique(statusEvidenceIds),
+          dryRun: false
+        });
+        operations.statuses.push(status);
+      }
+
+      for (const entryPoint of slice.entryPoints) {
+        operations.entryPoints.push(this.upsertEntryPoint(data.projectId, { ...entryPoint, mapId: map.data.id, dryRun: false }));
+      }
+
+      for (const reference of slice.codeReferences) {
+        operations.codeReferences.push(
+          this.upsertCodeReference(data.projectId, {
+            ...reference,
+            mapId: map.data.id,
+            featureId: feature?.data.id,
+            dryRun: false
+          })
+        );
+      }
+
+      if (slice.align && feature && feature.data.id !== canonicalFeature.data.id) {
+        operations.alignments.push(
+          this.upsertAlignment(data.projectId, {
+            stableKey: slice.alignmentStableKey,
+            name: `${canonicalFeature.data.name} -> ${feature.data.name}`,
+            relation: slice.alignmentRelation,
+            status: 'confirmed',
+            members: [
+              { targetType: 'feature', targetId: canonicalFeature.data.id, role: 'source' },
+              { targetType: 'feature', targetId: feature.data.id, role: 'target' }
+            ],
+            dryRun: false
+          })
+        );
+      }
+    }
+
+    for (const gap of data.gaps) {
+      const { evidence: inlineEvidence, ...gapInput } = gap;
+      const gapResult = this.upsertCapabilityGap(data.projectId, {
+        ...gapInput,
+        canonicalFeatureId: canonicalFeature.data.id,
+        dryRun: false
+      });
+      operations.gaps.push(gapResult);
+      if (inlineEvidence.length > 0) {
+        const evidenceIds = [...gapResult.data.evidenceIds];
+        for (const evidence of inlineEvidence) {
+          const evidenceResult = this.upsertEvidence(data.projectId, {
+            ...evidence,
+            targetType: 'capability_gap',
+            targetId: gapResult.data.id,
+            dryRun: false
+          });
+          operations.evidence.push(evidenceResult);
+          evidenceIds.push(evidenceResult.data.id);
+        }
+        operations.gaps.push(
+          this.upsertCapabilityGap(data.projectId, {
+            ...gapInput,
+            canonicalFeatureId: canonicalFeature.data.id,
+            evidenceIds: unique(evidenceIds),
+            dryRun: false
+          })
+        );
+      }
+    }
+
+    const dossier = this.featureDossier({ projectId: data.projectId, featureId: canonicalFeature.data.id });
+    return {
+      success: true,
+      dryRun: false,
+      rolledBack: false,
+      operations,
+      dossier
+    };
+  }
+
+  private writeFeatureFocusStart(data: ReturnType<typeof StartFeatureFocusSchema.parse>): FeatureFocusStartResult {
+    const map = this.upsertMap(data.projectId, { ...data.canonicalMap, dryRun: false });
+    const feature = this.upsertFeature(map.data.id, { ...data.canonicalFeature, mapId: map.data.id, dryRun: false });
+    const focus = this.upsertFeatureFocus(data.projectId, {
+      ...data.focus,
+      featureId: feature.data.id,
+      title: data.focus.title ?? `深挖 ${feature.data.name}`,
+      dryRun: false
+    });
+    const dossier = this.featureDossier({ projectId: data.projectId, featureId: feature.data.id });
+    return {
+      success: true,
+      dryRun: false,
+      rolledBack: false,
+      map,
+      feature,
+      focus,
+      dossier
+    };
+  }
+
+  private canonicalFeatureForDossier(projectId: string, feature: FeatureRow): FeatureRow {
+    const map = this.getMap(feature.mapId);
+    if (map.axis === 'capability' || map.axis === 'product') {
+      return feature;
+    }
+
+    const status = this.listCapabilityStatuses(projectId, {}).find((item) => item.featureId === feature.id);
+    if (status?.canonicalFeature) {
+      return status.canonicalFeature;
+    }
+
+    const alignments = this.findAlignmentsForTargets(projectId, new Set([`feature:${feature.id}`]));
+    const alignedFeatures = uniqueById(
+      alignments.flatMap((alignment) =>
+        alignment.members
+          .filter((member) => member.targetType === 'feature' && member.targetId !== feature.id)
+          .map((member) => this.findFeatureById(member.targetId))
+          .filter(isNonNull)
+      )
+    );
+    const productFeature = alignedFeatures.find((item) => {
+      const itemMap = this.findMapById(item.mapId);
+      return itemMap?.axis === 'product' || itemMap?.axis === 'capability';
+    });
+    return productFeature ?? feature;
+  }
+
   private findCapabilityStatusForUpsert(projectId: string, id: string | undefined, signature: string): CapabilityStatusRow | null {
     const matches = [
       id ? this.findCapabilityStatusById(id) : null,
@@ -2194,6 +3184,104 @@ export class FuncTreeRepository {
     };
   }
 
+  private resolveFeatureFocusFeature(
+    projectId: string,
+    input: {
+      featureId?: string;
+      featureStableKey?: string;
+      mapId?: string;
+      mapStableKey?: string;
+      featureVersion?: string;
+      version?: string;
+    }
+  ): FeatureRow {
+    const mapId = input.mapId || input.mapStableKey ? this.resolveOptionalMapId(projectId, input.mapId, input.mapStableKey) ?? undefined : undefined;
+    const feature = input.featureId ? this.getFeature(input.featureId) : this.resolveFeatureByStableKey(projectId, input.featureStableKey ?? '', input.featureVersion ?? input.version, mapId);
+    if (feature.projectId !== projectId) {
+      throw new ValidationError('功能不属于当前项目。');
+    }
+    return feature;
+  }
+
+  private resolveFocusedFeature(
+    projectId: string,
+    input: {
+      focusId?: string;
+      focusStableKey?: string;
+      featureId?: string;
+      featureStableKey?: string;
+      mapId?: string;
+      mapStableKey?: string;
+      featureVersion?: string;
+      version?: string;
+    }
+  ): { feature: FeatureRow; selectedFocus: FeatureFocusRow | null } {
+    const mapId = input.mapId || input.mapStableKey ? this.resolveOptionalMapId(projectId, input.mapId, input.mapStableKey) ?? undefined : undefined;
+    const focus = input.focusId ? this.getFeatureFocus(input.focusId) : input.focusStableKey ? this.findFeatureFocusByStableKey(projectId, input.focusStableKey) : null;
+    if (input.focusStableKey && !focus) {
+      throw new NotFoundError(`功能焦点不存在: ${input.focusStableKey}`);
+    }
+    if (focus && focus.projectId !== projectId) {
+      throw new ValidationError('功能焦点不属于当前项目。');
+    }
+    const feature = focus
+      ? this.getFeature(focus.featureId, true)
+      : input.featureId
+        ? this.getFeature(input.featureId, true)
+        : this.resolveFeatureByStableKey(projectId, input.featureStableKey ?? '', input.featureVersion ?? input.version, mapId);
+    if (feature.projectId !== projectId) {
+      throw new ValidationError('功能不属于当前项目。');
+    }
+    if (mapId && feature.mapId !== mapId) {
+      throw new ValidationError('功能不属于指定功能地图。');
+    }
+    if (input.featureId && feature.id !== input.featureId) {
+      throw new ValidationError('focusId/focusStableKey 与 featureId 指向不同功能。');
+    }
+    if (input.featureStableKey && feature.stableKey !== input.featureStableKey) {
+      throw new ValidationError('focusId/focusStableKey 与 featureStableKey 指向不同功能。');
+    }
+    return { feature, selectedFocus: focus ?? null };
+  }
+
+  private findFeatureFocusForUpsert(projectId: string, id: string | undefined, stableKey: string): FeatureFocusRow | null {
+    const matches = [
+      id ? this.findFeatureFocusById(id) : null,
+      stableKey ? this.findFeatureFocusByStableKey(projectId, stableKey) : null
+    ].filter((focus): focus is FeatureFocusRow => Boolean(focus));
+    for (const focus of matches) {
+      if (focus.projectId !== projectId) {
+        throw new ValidationError('功能焦点 ID 不属于当前项目。');
+      }
+    }
+    const [first] = matches;
+    if (first && matches.some((focus) => focus.id !== first.id)) {
+      throw new ValidationError('功能焦点 id 和 stableKey 指向不同对象，请先查询上下文确认。');
+    }
+    return first ?? null;
+  }
+
+  private findFeatureFocusById(id: string): FeatureFocusRow | null {
+    const row = this.db.prepare('SELECT * FROM feature_focuses WHERE id = ?').get(id);
+    return row ? this.enrichFeatureFocus(mapFeatureFocus(row)) : null;
+  }
+
+  private findFeatureFocusByStableKey(projectId: string, stableKey: string): FeatureFocusRow | null {
+    const row = this.db.prepare('SELECT * FROM feature_focuses WHERE project_id = ? AND stable_key = ?').get(projectId, stableKey);
+    return row ? this.enrichFeatureFocus(mapFeatureFocus(row)) : null;
+  }
+
+  private enrichFeatureFocus(focus: FeatureFocusRow): FeatureFocusRow {
+    const feature = this.findFeatureById(focus.featureId) ?? undefined;
+    return {
+      ...focus,
+      feature,
+      map: feature ? this.findMapById(feature.mapId) ?? undefined : undefined,
+      targetMaps: focus.targetMapIds.map((mapId) => this.findMapById(mapId)).filter(isNonNull),
+      relatedFeatures: focus.relatedFeatureIds.map((featureId) => this.findFeatureById(featureId)).filter(isNonNull)
+    };
+  }
+
   private evidenceForIds(projectId: string, evidenceIds: string[]): EvidenceRow[] {
     if (evidenceIds.length === 0) return [];
     const placeholders = evidenceIds.map(() => '?').join(', ');
@@ -2222,6 +3310,19 @@ export class FuncTreeRepository {
       .all(projectId, fallbackMapId)
       .map(mapEntryPoint);
     return uniqueById([...entriesById, ...mapEntries]);
+  }
+
+  private seedPathContexts(projectId: string, focuses: FeatureFocusRow[], include: Set<string>): QueryPathContextResult[] {
+    const paths = unique(focuses.flatMap((focus) => focus.seedPaths)).slice(0, 12);
+    return paths.map((path) =>
+      this.queryPathContext({
+        projectId,
+        path,
+        pathMode: 'exact',
+        includeReferences: include.has('codeReferences'),
+        includeAlignments: include.has('alignments')
+      })
+    );
   }
 
   private impactedFeatures(projectId: string, feature: FeatureRow, alignments: AlignmentRow[], depth: number): FeatureRow[] {
@@ -2459,6 +3560,37 @@ export class FuncTreeRepository {
     return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM features f WHERE ${where.join(' AND ')}`).get(...args));
   }
 
+  private queryFeatureFocuses(query: ParsedQueryContext, limit: number, offset: number): FeatureFocusRow[] {
+    const { where, args } = this.featureFocusQueryParts(query);
+    return this.db
+      .prepare(
+        `SELECT ff.*
+         FROM feature_focuses ff
+         JOIN features f ON f.id = ff.feature_id
+         WHERE ${where.join(' AND ')}
+         ORDER BY CASE ff.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                  CASE ff.status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 WHEN 'ready_for_implementation' THEN 2 ELSE 3 END,
+                  ff.updated_at DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(...args, limit, offset)
+      .map((row) => this.enrichFeatureFocus(mapFeatureFocus(row)));
+  }
+
+  private countFeatureFocuses(query: ParsedQueryContext): number {
+    const { where, args } = this.featureFocusQueryParts(query);
+    return scalarCount(
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM feature_focuses ff
+           JOIN features f ON f.id = ff.feature_id
+           WHERE ${where.join(' AND ')}`
+        )
+        .get(...args)
+    );
+  }
+
   private queryEntryPoints(query: ParsedQueryContext, limit: number, offset: number): EntryPointRow[] {
     const { where, args } = this.entryPointQueryParts(query);
     return this.db
@@ -2509,6 +3641,116 @@ export class FuncTreeRepository {
   private countAlignments(query: ParsedQueryContext): number {
     const { where, args } = this.alignmentQueryParts(query);
     return scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM alignments a WHERE ${where.join(' AND ')}`).get(...args));
+  }
+
+  private queryFeatureSearchRows(query: ParsedSearchFeatures, mapId: string | undefined, fetchLimit: number): unknown[] {
+    const where = ['f.project_id = ?'];
+    const args: SQLInputValue[] = [query.projectId];
+    if (mapId) {
+      where.push('f.map_id = ?');
+      args.push(mapId);
+    }
+    if (query.axes?.length) {
+      where.push(`m.axis IN (${query.axes.map(() => '?').join(', ')})`);
+      args.push(...query.axes);
+    }
+    if (query.statuses?.length) {
+      where.push(`f.status IN (${query.statuses.map(() => '?').join(', ')})`);
+      args.push(...query.statuses);
+    } else if (!query.includeArchived) {
+      where.push("f.status NOT IN ('archived', 'deprecated')");
+      where.push("m.status NOT IN ('archived', 'deprecated')");
+    }
+    appendSearchExpressionsClause(
+      where,
+      args,
+      [
+        'f.id',
+        'f.stable_key',
+        'f.name',
+        'f.version',
+        'f.status',
+        'f.kind',
+        'f.description',
+        'm.stable_key',
+        'm.name',
+        'm.axis',
+        'm.scope',
+        'm.kind',
+        'm.description',
+        'fd.intent',
+        'fd.current_behavior',
+        'fd.expected_behavior',
+        'fd.scope',
+        'fd.known_gaps_json',
+        'fd.open_questions_json',
+        'fd.acceptance_criteria_json',
+        'fd.risks_json',
+        'fd.details_markdown'
+      ],
+      query.query
+    );
+    if (query.path) {
+      where.push("EXISTS (SELECT 1 FROM code_references cr WHERE cr.feature_id = f.id AND LOWER(cr.path) LIKE ? ESCAPE '\\')");
+      args.push(pathPattern(query.path, query.pathMode));
+    }
+    return this.db
+      .prepare(
+        `SELECT f.*
+         FROM features f
+         JOIN maps m ON m.id = f.map_id
+         LEFT JOIN feature_details fd ON fd.feature_id = f.id
+         WHERE ${where.join(' AND ')}
+         ORDER BY
+           CASE m.axis WHEN 'product' THEN 0 WHEN 'capability' THEN 1 WHEN 'web' THEN 2 WHEN 'backend' THEN 3 WHEN 'sdk' THEN 4 WHEN 'ops' THEN 5 ELSE 6 END,
+           f.updated_at DESC,
+           f.name
+         LIMIT ?`
+      )
+      .all(...args, Math.min(fetchLimit, 400));
+  }
+
+  private featureSearchCandidateForFeature(projectId: string, feature: FeatureRow, score: number, reasons: string[]): FeatureSearchCandidate {
+    const featureMap = this.getMap(feature.mapId);
+    const references = this.codeReferencesForFeatures(projectId, [feature.id]);
+    const openFocuses = this.listFeatureFocuses({ projectId, featureId: feature.id, limit: 5 }).filter((focus) => !['implemented', 'closed', 'archived'].includes(focus.status)).slice(0, 3);
+    const openGaps = this.openGapsForFeature(projectId, feature.id).slice(0, 3);
+    const alignments = this.findAlignmentsForTargets(projectId, new Set([`feature:${feature.id}`, ...references.map((reference) => `code_reference:${reference.id}`)]));
+    return {
+      feature,
+      map: featureMap,
+      score,
+      reasons,
+      openFocuses,
+      codeReferenceCount: references.length,
+      matchingCodeReferences: references.slice(0, 3),
+      gapCount: openGaps.length,
+      openGaps,
+      alignmentCount: alignments.length,
+      nextAction: featureSearchNextAction(openFocuses, references.slice(0, 3), openGaps)
+    };
+  }
+
+  private openGapsForFeature(projectId: string, featureId: string): CapabilityGapRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM capability_gaps
+         WHERE project_id = ? AND status = 'open' AND (canonical_feature_id = ? OR feature_id = ?)
+         ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, title`
+      )
+      .all(projectId, featureId, featureId)
+      .map((row) => this.enrichCapabilityGap(mapCapabilityGap(row)));
+  }
+
+  private suggestFeatureSearchStart(projectId: string, query: string, topCandidate: FeatureSearchCandidate | undefined): FeatureSearchResult['suggestedStart'] {
+    const preferredMap = this.listMaps(projectId).find((map) => map.axis === 'product' || map.axis === 'capability') ?? this.listMaps(projectId)[0];
+    const featureName = query || topCandidate?.feature.name || '新功能';
+    return {
+      canonicalMapStableKey: preferredMap?.stableKey ?? 'product.focus',
+      canonicalFeatureStableKey: stableKeyFromSearchQuery(featureName),
+      featureName,
+      reason: topCandidate ? `最高候选分数 ${topCandidate.score}，建议确认后启动新焦点或选择候选。` : '没有找到可信候选，建议直接从该功能点启动焦点。'
+    };
   }
 
   private projectQueryParts(query: ParsedQueryContext): QueryParts {
@@ -2621,6 +3863,52 @@ export class FuncTreeRepository {
       args.push(pathPattern(query.path, query.pathMode));
     }
     appendKeywordClause(where, args, 'f', ['id', 'stable_key', 'name', 'version', 'status', 'kind', 'description'], query.keyword);
+    return { where, args };
+  }
+
+  private featureFocusQueryParts(query: ParsedQueryContext): QueryParts {
+    const where = ['1=1'];
+    const args: SQLInputValue[] = [];
+    if (query.projectId) {
+      where.push('ff.project_id = ?');
+      args.push(query.projectId);
+    }
+    if (query.mapId) {
+      where.push('f.map_id = ?');
+      args.push(query.mapId);
+    }
+    if (query.stableKey) {
+      where.push('ff.stable_key = ?');
+      args.push(query.stableKey);
+    }
+    if (query.alignmentId) {
+      where.push(
+        `EXISTS (
+          SELECT 1 FROM alignment_members am
+          WHERE am.alignment_id = ? AND am.target_type = 'feature' AND am.target_id = ff.feature_id
+        )`
+      );
+      args.push(query.alignmentId);
+    }
+    if (query.parentFeatureId === null) {
+      where.push('f.parent_feature_id IS NULL');
+    } else if (query.parentFeatureId) {
+      where.push('f.parent_feature_id = ?');
+      args.push(query.parentFeatureId);
+    }
+    if (query.entryPointId) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.feature_id = ff.feature_id AND cr.entry_point_id = ?)');
+      args.push(query.entryPointId);
+    }
+    if (query.codeReferenceId) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.id = ? AND cr.feature_id = ff.feature_id)');
+      args.push(query.codeReferenceId);
+    }
+    if (query.path) {
+      where.push('EXISTS (SELECT 1 FROM code_references cr WHERE cr.feature_id = ff.feature_id AND LOWER(cr.path) LIKE ? ESCAPE \'\\\')');
+      args.push(pathPattern(query.path, query.pathMode));
+    }
+    appendKeywordClause(where, args, 'ff', ['id', 'stable_key', 'title', 'mode', 'status', 'priority', 'source_type', 'question', 'scope', 'findings'], query.keyword);
     return { where, args };
   }
 
@@ -2931,6 +4219,9 @@ export class FuncTreeRepository {
       evidenceCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM evidence ${projectWhere}`).get(...projectArgs)),
       entryPointCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM entry_points ${projectWhere}`).get(...projectArgs)),
       codeReferenceCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM code_references ${projectWhere}`).get(...projectArgs)),
+      featureFocusCount: projectId ? this.featureFocusCount(projectId) : scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM feature_focuses').get()),
+      openFeatureFocusCount: projectId ? this.openFeatureFocusCount(projectId) : scalarCount(this.db.prepare("SELECT COUNT(*) AS count FROM feature_focuses WHERE status NOT IN ('implemented', 'closed', 'archived')").get()),
+      latestFeatureFocus: projectId ? this.latestFeatureFocus(projectId) : null,
       scanRunCount: scalarCount(this.db.prepare(`SELECT COUNT(*) AS count FROM scan_runs ${projectWhere}`).get(...projectArgs)),
       lastUpdatedAt: this.lastUpdatedAt(projectId),
       stableKeyConflictCount: this.stableKeyConflictCount(projectId),
@@ -2957,10 +4248,11 @@ export class FuncTreeRepository {
                UNION ALL SELECT updated_at FROM code_references WHERE project_id = ?
                UNION ALL SELECT updated_at FROM evidence WHERE project_id = ?
                UNION ALL SELECT updated_at FROM alignments WHERE project_id = ?
+               UNION ALL SELECT updated_at FROM feature_focuses WHERE project_id = ?
                UNION ALL SELECT updated_at FROM scan_runs WHERE project_id = ?
              )`
           )
-          .get(projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId) as { updated_at: string | null })
+          .get(projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId, projectId) as { updated_at: string | null })
       : (this.db
           .prepare(
             `SELECT MAX(updated_at) AS updated_at
@@ -2973,11 +4265,25 @@ export class FuncTreeRepository {
                UNION ALL SELECT updated_at FROM code_references
                UNION ALL SELECT updated_at FROM evidence
                UNION ALL SELECT updated_at FROM alignments
+               UNION ALL SELECT updated_at FROM feature_focuses
                UNION ALL SELECT updated_at FROM scan_runs
              )`
           )
           .get() as { updated_at: string | null });
     return rows.updated_at;
+  }
+
+  private featureFocusCount(projectId: string): number {
+    return scalarCount(this.db.prepare('SELECT COUNT(*) AS count FROM feature_focuses WHERE project_id = ?').get(projectId));
+  }
+
+  private openFeatureFocusCount(projectId: string): number {
+    return scalarCount(this.db.prepare("SELECT COUNT(*) AS count FROM feature_focuses WHERE project_id = ? AND status NOT IN ('implemented', 'closed', 'archived')").get(projectId));
+  }
+
+  private latestFeatureFocus(projectId: string): FeatureFocusRow | null {
+    const row = this.db.prepare('SELECT * FROM feature_focuses WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1').get(projectId);
+    return row ? this.enrichFeatureFocus(mapFeatureFocus(row)) : null;
   }
 
   private stableKeyConflictCount(projectId: string | undefined): number {
@@ -3384,6 +4690,16 @@ export class FuncTreeRepository {
       }
       return null;
     }
+    if (item.type === 'feature_focus') {
+      if (item.id) {
+        const focus = this.getFeatureFocus(item.id);
+        if (focus.projectId !== projectId) throw new ValidationError('功能焦点不属于当前项目。');
+        return { id: focus.id };
+      }
+      if (!item.stableKey) return null;
+      const focus = this.findFeatureFocusByStableKey(projectId, item.stableKey);
+      return focus ? { id: focus.id, candidates: [featureFocusCandidate(focus)] } : null;
+    }
     if (item.type === 'entry_point') {
       if (item.id) {
         const entryPoint = this.getEntryPoint(item.id);
@@ -3576,6 +4892,8 @@ export class ValidationError extends Error {
 }
 
 class BatchRollbackError extends Error {}
+
+class DryRunRollbackError extends Error {}
 
 type QueryParts = {
   where: string[];
@@ -3794,6 +5112,33 @@ function mapCapabilityGap(row: unknown): CapabilityGapRow {
   };
 }
 
+function mapFeatureFocus(row: unknown): FeatureFocusRow {
+  const value = row as Record<string, unknown>;
+  return {
+    id: String(value.id),
+    projectId: String(value.project_id),
+    stableKey: String(value.stable_key ?? ''),
+    featureId: String(value.feature_id),
+    title: String(value.title),
+    mode: String(value.mode),
+    status: String(value.status),
+    priority: String(value.priority),
+    sourceType: String(value.source_type),
+    question: String(value.question ?? ''),
+    scope: String(value.scope ?? ''),
+    sourceRefs: parseStringArray(value.source_refs_json),
+    seedPaths: parseStringArray(value.seed_paths_json),
+    targetMapIds: parseStringArray(value.target_map_ids_json),
+    relatedFeatureIds: parseStringArray(value.related_feature_ids_json),
+    nextSteps: parseStringArray(value.next_steps_json),
+    findings: String(value.findings ?? ''),
+    confidence: Number(value.confidence ?? 0.5),
+    metadata: parseJson(value.metadata_json),
+    createdAt: String(value.created_at),
+    updatedAt: String(value.updated_at)
+  };
+}
+
 function mapAlignment(row: unknown, members: AlignmentMemberRow[]): AlignmentRow {
   const value = row as Record<string, unknown>;
   return {
@@ -3903,6 +5248,769 @@ function capabilityGapSignature(canonicalFeatureId: string, mapId: string | null
   return [canonicalFeatureId, mapId ?? '', featureId ?? '', gapType, title.trim().toLowerCase()].join('|');
 }
 
+function featureFocusStableKey(feature: FeatureRow, title: string): string {
+  const suffix = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 80);
+  return [`focus`, feature.stableKey, suffix || 'analysis'].join('.').slice(0, 180).replace(/\.+$/u, '');
+}
+
+function programmingNextActions(featureId: string, focuses: FeatureFocusRow[], gaps: CapabilityGapRow[], qualityIssues: QualityIssue[], verification: string[]): ProgrammingNextAction[] {
+  const actions: ProgrammingNextAction[] = [];
+  const activeFocuses = focuses.filter((focus) => !['implemented', 'closed', 'archived'].includes(focus.status));
+  for (const focus of activeFocuses) {
+    for (const step of focus.nextSteps.slice(0, 5)) {
+      actions.push({
+        priority: focus.priority === 'high' ? 'high' : focus.priority === 'low' ? 'low' : 'medium',
+        source: 'focus',
+        title: step,
+        detail: focus.question || focus.title,
+        targetType: 'feature_focus',
+        targetId: focus.id
+      });
+    }
+    for (const seedPath of focus.seedPaths.slice(0, 4)) {
+      actions.push({
+        priority: focus.priority === 'low' ? 'medium' : 'high',
+        source: 'seed_path',
+        title: `读取 ${seedPath}`,
+        detail: focus.title,
+        targetType: 'feature_focus',
+        targetId: focus.id
+      });
+    }
+  }
+  for (const gap of gaps.filter((item) => item.status === 'open').slice(0, 5)) {
+    actions.push({
+      priority: gap.severity === 'high' ? 'high' : gap.severity === 'low' ? 'low' : 'medium',
+      source: 'gap',
+      title: gap.recommendedAction || gap.title,
+      detail: gap.description || gap.title,
+      targetType: 'capability_gap',
+      targetId: gap.id
+    });
+  }
+  for (const issue of qualityIssues.slice(0, 5)) {
+    actions.push({
+      priority: issue.severity === 'error' ? 'high' : issue.severity === 'info' ? 'low' : 'medium',
+      source: 'quality',
+      title: issue.message,
+      detail: issue.hint,
+      targetType: issue.targetType,
+      targetId: issue.targetId
+    });
+  }
+  for (const item of verification.slice(0, 3)) {
+    actions.push({
+      priority: 'medium',
+      source: 'verification',
+      title: item,
+      detail: '修改后执行该验证线索。',
+      targetType: 'feature',
+      targetId: featureId
+    });
+  }
+  return actions.sort((left, right) => actionPriorityRank(left.priority) - actionPriorityRank(right.priority)).slice(0, 12);
+}
+
+function actionPriorityRank(priority: ProgrammingNextAction['priority']): number {
+  if (priority === 'high') return 0;
+  if (priority === 'medium') return 1;
+  return 2;
+}
+
+function scoreFeatureSearchCandidate(
+  feature: FeatureRow,
+  featureMap: FeatureMapRow,
+  matchingCodeReferences: CodeReferenceRow[],
+  openFocuses: FeatureFocusRow[],
+  openGaps: CapabilityGapRow[],
+  query: string,
+  terms: string[],
+  pathValue: string,
+  pathMode: string
+): { score: number; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+  const normalizedQuery = query.toLowerCase();
+  const featureStableKey = feature.stableKey.toLowerCase();
+  const featureName = feature.name.toLowerCase();
+  const detailText = featureSearchText(feature, featureMap);
+  if (normalizedQuery) {
+    if (featureStableKey === normalizedQuery) {
+      score += 100;
+      reasons.push('stableKey 精确匹配');
+    }
+    if (featureName === normalizedQuery) {
+      score += 90;
+      reasons.push('功能名称精确匹配');
+    }
+    if (featureStableKey.includes(normalizedQuery) && featureStableKey !== normalizedQuery) {
+      score += 64;
+      reasons.push('stableKey 包含查询');
+    }
+    if (featureName.includes(normalizedQuery) && featureName !== normalizedQuery) {
+      score += 56;
+      reasons.push('功能名称包含查询');
+    }
+    if (feature.description.toLowerCase().includes(normalizedQuery) || detailText.includes(normalizedQuery)) {
+      score += 28;
+      reasons.push('功能说明或详情命中');
+    }
+    if (featureMap.stableKey.toLowerCase().includes(normalizedQuery) || featureMap.name.toLowerCase().includes(normalizedQuery)) {
+      score += 18;
+      reasons.push('所在功能地图命中');
+    }
+    const termHits = terms.filter((term) => detailText.includes(term));
+    if (termHits.length > 1) {
+      score += Math.min(termHits.length * 6, 30);
+      reasons.push(`命中 ${termHits.length} 个查询片段`);
+    }
+  }
+  if (pathValue && matchingCodeReferences.some((reference) => pathMatches(reference.path, pathValue, pathMode))) {
+    score += 70;
+    reasons.push('代码路径命中');
+  } else if (matchingCodeReferences.length > 0) {
+    score += 20;
+    reasons.push('相关代码引用命中');
+  }
+  if (featureMap.axis === 'product' || featureMap.axis === 'capability') {
+    score += 10;
+    reasons.push('产品/能力视角候选');
+  }
+  if (openFocuses.length > 0) {
+    score += 8;
+    reasons.push('已有进行中的功能焦点');
+  }
+  if (openGaps.length > 0) {
+    score += 5;
+    reasons.push('存在开放缺口');
+  }
+  return { score, reasons: unique(reasons) };
+}
+
+function featureSearchText(feature: FeatureRow, featureMap: FeatureMapRow): string {
+  const details = feature.details;
+  return [
+    feature.id,
+    feature.stableKey,
+    feature.name,
+    feature.version,
+    feature.status,
+    feature.kind,
+    feature.description,
+    feature.tags.join(' '),
+    featureMap.stableKey,
+    featureMap.name,
+    featureMap.axis,
+    featureMap.scope,
+    featureMap.kind,
+    featureMap.description,
+    details?.intent,
+    details?.currentBehavior,
+    details?.expectedBehavior,
+    details?.scope,
+    ...(details?.knownGaps ?? []),
+    ...(details?.openQuestions ?? []),
+    ...(details?.acceptanceCriteria ?? []),
+    ...(details?.risks ?? []),
+    details?.detailsMarkdown
+  ]
+    .filter(isString)
+    .join(' ')
+    .toLowerCase();
+}
+
+function codeReferenceMatchesSearch(reference: CodeReferenceRow, query: string, terms: string[], pathValue: string, pathMode: string): boolean {
+  if (pathValue && pathMatches(reference.path, pathValue, pathMode)) {
+    return true;
+  }
+  const normalizedQuery = query.toLowerCase();
+  if (!normalizedQuery) return false;
+  const text = [reference.stableKey, reference.path, reference.symbol, reference.kind, reference.description, reference.roleInFeature, reference.changeGuidance, reference.verificationHint, reference.blastRadius]
+    .join(' ')
+    .toLowerCase();
+  return text.includes(normalizedQuery) || terms.some((term) => text.includes(term));
+}
+
+function featureSearchNextAction(openFocuses: FeatureFocusRow[], matchingCodeReferences: CodeReferenceRow[], openGaps: CapabilityGapRow[]): string {
+  const focus = openFocuses[0];
+  if (focus) {
+    return `继续焦点：${focus.title}${focus.nextSteps[0] ? `，下一步 ${focus.nextSteps[0]}` : ''}`;
+  }
+  const reference = matchingCodeReferences[0];
+  if (reference) {
+    return `先读代码引用：${reference.path}${reference.symbol ? ` / ${reference.symbol}` : ''}`;
+  }
+  const gap = openGaps[0];
+  if (gap) {
+    return `先处理缺口：${gap.recommendedAction || gap.title}`;
+  }
+  return '读取功能档案；如果目标不明确，先启动一个功能焦点。';
+}
+
+function preparedFeatureNextSteps(candidate: FeatureSearchCandidate, dossier: FeatureDossierResult, programmingContext: ProgrammingContextResult, selectedFocus: FeatureFocusRow | null): string[] {
+  const focus = selectedFocus ?? candidate.openFocuses[0] ?? null;
+  const steps = [
+    focus ? `继续功能焦点：${focus.title}${focus.nextSteps[0] ? `，下一步：${focus.nextSteps[0]}` : ''}` : '如本次目标还不清晰，先用 functree_upsert_feature_focus 记录问题、范围和 seedPaths。',
+    programmingContext.nextActions[0] ? `优先行动：${programmingContext.nextActions[0].title}` : '',
+    programmingContext.requiredEntryPoints[0] ? `先读入口：${programmingContext.requiredEntryPoints[0].path}` : '',
+    programmingContext.keyCodeReferences[0] ? `再读关键代码：${programmingContext.keyCodeReferences[0].path}${programmingContext.keyCodeReferences[0].symbol ? ` / ${programmingContext.keyCodeReferences[0].symbol}` : ''}` : '',
+    dossier.summary.openGapCount > 0 ? `确认 ${dossier.summary.openGapCount} 个开放缺口，避免把 mock/规划当成真实能力。` : '',
+    '改动或分析完成后，用 functree_upsert_feature_dossier 写回证据、代码引用、状态矩阵和缺口。'
+  ].filter(Boolean);
+  return unique(steps).slice(0, 8);
+}
+
+function preparedFeatureFallbackSteps(candidate: FeatureSearchCandidate | null, suggestedStart: FeatureSearchResult['suggestedStart']): string[] {
+  if (candidate) {
+    return [
+      `候选不够确定：${candidate.feature.name} / ${candidate.map.stableKey} / score ${candidate.score}`,
+      '先人工确认候选是否就是目标功能；确认后用 featureId 调用 functree_prepare_feature_work。',
+      suggestedStart ? `如果不是已有功能，用 functree_start_feature_focus 启动：${suggestedStart.canonicalFeatureStableKey}` : ''
+    ].filter(Boolean);
+  }
+  return [
+    suggestedStart ? `没有可信候选；可用 functree_start_feature_focus 启动：${suggestedStart.canonicalFeatureStableKey}` : '没有可信候选；请补充功能名、stableKey 或代码路径后重试。',
+    '启动焦点后，再补产品意图、seedPaths、目标 map 和下一步。'
+  ];
+}
+
+function preparedFeatureToolCalls(projectId: string, candidate: FeatureSearchCandidate, selectedFocus: FeatureFocusRow | null, depth: number): PreparedToolCall[] {
+  const feature = candidate.feature;
+  const calls: PreparedToolCall[] = [
+    {
+      toolName: 'functree_get_feature_dossier',
+      priority: 'high',
+      reason: '读取完整功能事实档案，用于确认产品意图、实现切片、证据、缺口和对齐关系。',
+      arguments: { projectId, featureId: feature.id, depth }
+    },
+    {
+      toolName: 'functree_get_programming_context',
+      priority: 'high',
+      reason: '读取面向改代码的窄上下文，包括入口、关键代码引用、风险、验收项和推荐行动。',
+      arguments: { projectId, featureId: feature.id, depth }
+    }
+  ];
+  if (selectedFocus) {
+    calls.push({
+      toolName: 'functree_upsert_feature_focus',
+      priority: 'medium',
+      reason: '完成本轮分析或实现后，更新当前功能焦点的 findings、nextSteps、confidence 和状态。',
+      arguments: featureFocusUpdateArguments(projectId, selectedFocus)
+    });
+  } else {
+    calls.push({
+      toolName: 'functree_upsert_feature_focus',
+      priority: 'medium',
+      reason: '如果本轮工作需要长期续接，先为这个功能创建一个焦点，记录问题、范围、seedPaths 和下一步。',
+      arguments: {
+        projectId,
+        featureId: feature.id,
+        title: `深挖 ${feature.name}`.slice(0, 200),
+        mode: 'analyze',
+        priority: candidate.openGaps.some((gap) => gap.severity === 'high') ? 'high' : 'medium',
+        sourceType: 'user_request',
+        question: `继续分析 ${feature.name}`,
+        seedPaths: unique(candidate.matchingCodeReferences.map((reference) => reference.path)).slice(0, 20),
+        targetMaps: featureFocusTargetMaps(candidate),
+        nextSteps: [candidate.nextAction].filter(Boolean),
+        confidence: 0.5
+      }
+    });
+  }
+  return calls;
+}
+
+function preparedFeatureFallbackToolCalls(
+  projectId: string,
+  candidate: FeatureSearchCandidate | null,
+  suggestedStart: FeatureSearchResult['suggestedStart'],
+  depth: number
+): PreparedToolCall[] {
+  const calls: PreparedToolCall[] = [];
+  if (candidate) {
+    calls.push({
+      toolName: 'functree_prepare_feature_work',
+      priority: 'high',
+      reason: '人工确认候选就是目标功能后，用 featureId 重新准备单功能工作包。',
+      arguments: { projectId, featureId: candidate.feature.id, depth }
+    });
+  }
+  if (suggestedStart) {
+    calls.push({
+      toolName: 'functree_start_feature_focus',
+      priority: candidate ? 'medium' : 'high',
+      reason: candidate ? '如果候选不是目标功能，用该调用启动一个新的功能焦点。' : '当前没有可信候选，用该调用创建 canonical feature 并启动功能焦点。',
+      arguments: featureFocusStartArguments(projectId, suggestedStart)
+    });
+  }
+  return calls;
+}
+
+function featureFocusUpdateArguments(projectId: string, focus: FeatureFocusRow): Record<string, unknown> {
+  return {
+    projectId,
+    id: focus.id,
+    stableKey: focus.stableKey,
+    featureId: focus.featureId,
+    title: focus.title,
+    mode: focus.mode,
+    status: focus.status,
+    priority: focus.priority,
+    sourceType: focus.sourceType,
+    question: focus.question,
+    scope: focus.scope,
+    sourceRefs: focus.sourceRefs,
+    seedPaths: focus.seedPaths,
+    targetMaps: focus.targetMapIds.map((mapId) => ({ mapId })),
+    relatedFeatures: focus.relatedFeatureIds.map((featureId) => ({ featureId })),
+    nextSteps: focus.nextSteps,
+    findings: focus.findings,
+    confidence: focus.confidence
+  };
+}
+
+function featureFocusStartArguments(projectId: string, suggestedStart: NonNullable<FeatureSearchResult['suggestedStart']>): Record<string, unknown> {
+  return {
+    projectId,
+    canonicalMap: {
+      stableKey: suggestedStart.canonicalMapStableKey,
+      name: suggestedStart.canonicalMapStableKey
+    },
+    canonicalFeature: {
+      stableKey: suggestedStart.canonicalFeatureStableKey,
+      name: suggestedStart.featureName
+    },
+    focus: {
+      title: `深挖 ${suggestedStart.featureName}`.slice(0, 200),
+      mode: 'analyze',
+      sourceType: 'user_request',
+      question: suggestedStart.reason,
+      nextSteps: ['补齐产品、前端、后端、SDK、运维、证据和缺口。']
+    }
+  };
+}
+
+function featureFocusTargetMaps(candidate: FeatureSearchCandidate): Array<{ mapId: string }> {
+  return unique([candidate.map.id, ...candidate.matchingCodeReferences.map((reference) => reference.mapId).filter(isString)]).map((mapId) => ({ mapId }));
+}
+
+function featureReadinessReference(data: ParsedFeatureReadiness): {
+  focusId?: string;
+  focusStableKey?: string;
+  featureId?: string;
+  featureStableKey?: string;
+  mapId?: string;
+  mapStableKey?: string;
+  featureVersion?: string;
+} {
+  return {
+    focusId: data.focusId,
+    focusStableKey: data.focusStableKey,
+    featureId: data.featureId,
+    featureStableKey: data.featureStableKey,
+    mapId: data.mapId,
+    mapStableKey: data.mapStableKey,
+    featureVersion: data.featureVersion
+  };
+}
+
+function featureReadinessAxes(data: ParsedFeatureReadiness, dossier: FeatureDossierResult): MapAxis[] {
+  if (data.requiredAxes.length > 0) {
+    return uniqueMapAxes(data.requiredAxes);
+  }
+  const focusAxes = uniqueMapAxes((dossier.selectedFocus?.targetMaps ?? []).map((map) => map.axis).filter(isMapAxis));
+  if (focusAxes.length > 0) {
+    return focusAxes;
+  }
+  const statusAxes = uniqueMapAxes(dossier.implementationSlices.map((status) => status.map?.axis).filter(isMapAxis));
+  if (statusAxes.length > 0) {
+    return statusAxes;
+  }
+  return ['product', 'web', 'backend'];
+}
+
+function featureReadinessAxisCoverage(
+  axis: MapAxis,
+  dossier: FeatureDossierResult
+): { axis: MapAxis; status: 'covered' | 'missing' | 'partial'; maps: FeatureMapRow[]; implementationStatuses: CapabilityStatusRow[] } {
+  const implementationStatuses = dossier.implementationSlices.filter((status) => status.map?.axis === axis);
+  const maps = uniqueById([
+    dossier.focus.map.axis === axis ? dossier.focus.map : null,
+    dossier.canonicalMap.axis === axis ? dossier.canonicalMap : null,
+    ...implementationStatuses.map((status) => status.map).filter(isNonNull)
+  ].filter(isNonNull));
+  const coveredStatuses = new Set(['prototype', 'spec', 'approved', 'mock', 'partial', 'live', 'configured', 'deployed', 'deprecated']);
+  const weakStatuses = new Set(['unknown', 'none']);
+  const status =
+    maps.length === 0 && implementationStatuses.length === 0
+      ? 'missing'
+      : implementationStatuses.length === 0
+        ? 'partial'
+        : implementationStatuses.some((item) => coveredStatuses.has(item.status))
+          ? 'covered'
+          : implementationStatuses.every((item) => weakStatuses.has(item.status))
+            ? 'partial'
+            : 'covered';
+  return { axis, status, maps, implementationStatuses };
+}
+
+function featureReadinessChecks(dossier: FeatureDossierResult, qualityReport: QualityReportResult, axisCoverage: FeatureReadinessResult['axisCoverage']): FeatureReadinessCheck[] {
+  const checks: FeatureReadinessCheck[] = [];
+  const details = dossier.focus.feature.details ?? dossier.canonicalFeature.details;
+  const activeFocuses = dossier.focuses.filter((focus) => !['implemented', 'closed', 'archived'].includes(focus.status));
+  const selectedFocus = dossier.selectedFocus ?? activeFocuses[0] ?? null;
+  const codeFactEvidence = dossier.evidence.filter((item) => item.evidenceType === 'code_fact');
+  const productEvidence = dossier.evidence.filter((item) => item.sourceType === 'product_prototype' || item.evidenceType === 'doc_claim' || item.evidenceType === 'planned');
+  const hasIntent = hasUsefulText(details?.intent);
+  const hasProductIntentEvidence = productEvidence.length > 0;
+  const hasFeatureDescription = hasUsefulText(dossier.canonicalFeature.description);
+  const hasMockSignal = dossier.evidence.some((item) => item.evidenceType === 'mock_only') || dossier.implementationSlices.some((status) => status.status === 'mock') || dossier.focus.feature.status === 'mock_only';
+  const partialStatuses = dossier.implementationSlices.filter((status) => ['none', 'partial', 'mock', 'unknown'].includes(status.status));
+  const openGaps = dossier.gaps.filter((gap) => gap.status === 'open');
+  const highGaps = openGaps.filter((gap) => gap.severity === 'high');
+
+  checks.push(
+    readinessCheck({
+      id: 'focus.selected',
+      label: '当前功能焦点',
+      status: selectedFocus ? 'pass' : 'warn',
+      severity: 'medium',
+      message: selectedFocus ? `正在围绕焦点继续：${selectedFocus.title}` : '还没有可续接的功能焦点。',
+      hint: selectedFocus ? '完成分析后更新 findings、nextSteps 和 confidence。' : '用 functree_upsert_feature_focus 记录本轮问题、范围、seedPaths 和下一步。',
+      targetType: selectedFocus ? 'feature_focus' : 'feature',
+      targetId: selectedFocus?.id ?? dossier.focus.feature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'product.intent',
+      label: '产品意图',
+      status: hasIntent || hasProductIntentEvidence ? 'pass' : hasFeatureDescription ? 'warn' : 'fail',
+      severity: 'high',
+      message: hasIntent ? '已记录产品意图。' : hasProductIntentEvidence ? '有产品/文档证据支撑意图。' : hasFeatureDescription ? '只有功能简介，缺少结构化产品意图。' : '缺少产品意图，后续 AI 容易只按代码猜。',
+      hint: '补充 details.intent，或写入 product_prototype/doc_claim/planned evidence。',
+      targetType: 'feature',
+      targetId: dossier.canonicalFeature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'scope.boundary',
+      label: '范围边界',
+      status: hasUsefulText(details?.scope) ? 'pass' : 'warn',
+      severity: 'medium',
+      message: hasUsefulText(details?.scope) ? '已记录功能范围。' : '缺少“包含什么/不包含什么”的范围边界。',
+      hint: '补充 details.scope，尤其说明本轮不分析哪些相邻能力。',
+      targetType: 'feature',
+      targetId: dossier.focus.feature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'behavior.current_expected',
+      label: '现状与目标行为',
+      status: hasUsefulText(details?.currentBehavior) && hasUsefulText(details?.expectedBehavior) ? 'pass' : dossier.focus.feature.status === 'released' || dossier.focus.feature.status === 'completed' ? 'warn' : 'fail',
+      severity: dossier.focus.feature.status === 'released' || dossier.focus.feature.status === 'completed' ? 'medium' : 'high',
+      message:
+        hasUsefulText(details?.currentBehavior) && hasUsefulText(details?.expectedBehavior)
+          ? '已区分当前行为和目标行为。'
+          : '缺少 currentBehavior / expectedBehavior，未完成或 mock 功能会很难判断下一步。',
+      hint: '补充 details.currentBehavior 和 details.expectedBehavior，区分代码事实、产品目标和 mock 边界。',
+      targetType: 'feature',
+      targetId: dossier.focus.feature.id
+    })
+  );
+
+  for (const coverage of axisCoverage) {
+    checks.push(
+      readinessCheck({
+        id: `axis.${coverage.axis}`,
+        label: `${coverage.axis} 视角覆盖`,
+        status: coverage.status === 'covered' ? 'pass' : coverage.status === 'partial' ? 'warn' : 'fail',
+        severity: coverage.axis === 'product' || coverage.axis === 'capability' ? 'high' : 'medium',
+        message:
+          coverage.status === 'covered'
+            ? `${coverage.axis} 视角已有状态或实现切片。`
+            : coverage.status === 'partial'
+              ? `${coverage.axis} 视角只有地图/弱状态，还需要补清楚。`
+              : `缺少 ${coverage.axis} 视角，无法确认这个功能在该层是否存在。`,
+        hint: '用 functree_upsert_feature_dossier 写入 implementationSlices，或用 functree_upsert_capability_status 记录该 map 的状态。',
+        targetType: 'feature',
+        targetId: dossier.canonicalFeature.id
+      })
+    );
+  }
+
+  checks.push(
+    readinessCheck({
+      id: 'code.references',
+      label: '关键代码引用',
+      status: dossier.codeReferences.length > 0 ? 'pass' : 'fail',
+      severity: 'high',
+      message: dossier.codeReferences.length > 0 ? `已有 ${dossier.codeReferences.length} 条代码引用。` : '缺少关键代码引用，AI 不知道该从哪里读和改。',
+      hint: '写入 codeReferences，并尽量补 roleInFeature、changeGuidance、verificationHint 和 blastRadius。',
+      targetType: 'feature',
+      targetId: dossier.focus.feature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'evidence.code_fact',
+      label: '代码事实证据',
+      status: codeFactEvidence.length > 0 ? 'pass' : 'fail',
+      severity: 'high',
+      message: codeFactEvidence.length > 0 ? `已有 ${codeFactEvidence.length} 条 code_fact 证据。` : '缺少 code_fact 证据，mock、文档和真实实现容易混在一起。',
+      hint: '对真实运行代码写入 evidenceType=code_fact；只有原型或文档时用 doc_claim/planned/mock_only。',
+      targetType: 'feature',
+      targetId: dossier.focus.feature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'alignment.cross_map',
+      label: '跨视角对齐',
+      status: dossier.alignments.length > 0 || dossier.implementationSlices.length > 0 ? 'pass' : 'warn',
+      severity: 'medium',
+      message: dossier.alignments.length > 0 ? `已有 ${dossier.alignments.length} 条对齐关系。` : dossier.implementationSlices.length > 0 ? '已有状态矩阵，但缺少显式 alignment。' : '缺少跨产品/前端/后端的对齐关系。',
+      hint: '用 alignment 的 implements/mock_of/backend_supports/prototype_intent 等关系把同一能力的不同实现连起来。',
+      targetType: 'feature',
+      targetId: dossier.canonicalFeature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'gaps.explicit',
+      label: '缺口与冲突',
+      status: partialStatuses.length === 0 || openGaps.length > 0 ? 'pass' : 'warn',
+      severity: 'medium',
+      message:
+        partialStatuses.length === 0
+          ? '未发现明显 mock/partial/none 状态需要记录缺口。'
+          : openGaps.length > 0
+            ? `已有 ${openGaps.length} 个开放缺口。`
+            : '存在 mock/partial/none/unknown 状态，但没有结构化缺口。',
+      hint: '用 functree_upsert_capability_gap 或 dossier.gaps 记录 mock_gap、implementation_gap、integration_gap、conflict 等。',
+      targetType: 'feature',
+      targetId: dossier.canonicalFeature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'acceptance.criteria',
+      label: '验收条件',
+      status: (details?.acceptanceCriteria.length ?? 0) > 0 ? 'pass' : ['draft', 'in_progress', 'reviewing', 'blocked', 'mock_only'].includes(dossier.focus.feature.status) ? 'fail' : 'warn',
+      severity: ['draft', 'in_progress', 'reviewing', 'blocked', 'mock_only'].includes(dossier.focus.feature.status) ? 'high' : 'medium',
+      message: (details?.acceptanceCriteria.length ?? 0) > 0 ? '已有验收条件。' : '缺少验收条件，后续实现完成度难判断。',
+      hint: '补充 details.acceptanceCriteria，并在 code reference 上写 verificationHint。',
+      targetType: 'feature',
+      targetId: dossier.focus.feature.id
+    })
+  );
+
+  checks.push(
+    readinessCheck({
+      id: 'mock.boundary',
+      label: 'Mock 边界',
+      status: hasMockSignal ? (hasUsefulText(details?.mockBoundary) ? 'pass' : 'fail') : 'pass',
+      severity: 'high',
+      message: hasMockSignal ? (hasUsefulText(details?.mockBoundary) ? '已标注 mock 边界。' : '发现 mock 信号但没有写清楚不能当作真实能力的边界。') : '未发现 mock 边界要求。',
+      hint: '在 details.mockBoundary 中说明 mock 覆盖范围、真实 API/存储是否接通、哪些行为不能当事实。',
+      targetType: 'feature',
+      targetId: dossier.focus.feature.id
+    })
+  );
+
+  if (qualityReport.summary.featuresWithoutCodeReferences > 0 || qualityReport.summary.featuresWithoutCodeEvidence > 0 || qualityReport.summary.draftDetailGaps > 0) {
+    checks.push(
+      readinessCheck({
+        id: 'quality.local_report',
+        label: '局部质量报告',
+        status: 'fail',
+        severity: 'high',
+        message: `局部质量报告仍有 ${qualityReport.summary.errors} 个错误、${qualityReport.summary.warnings} 个警告。`,
+        hint: '先处理 qualityReport.issues 中的高优先级项，再把焦点状态推进到 ready_for_implementation。',
+        targetType: 'feature',
+        targetId: dossier.focus.feature.id
+      })
+    );
+  }
+
+  if (highGaps.length > 0) {
+    checks.push(
+      readinessCheck({
+        id: 'gaps.high_severity',
+        label: '高风险缺口',
+        status: 'warn',
+        severity: 'high',
+        message: `存在 ${highGaps.length} 个高优先级开放缺口。`,
+        hint: highGaps[0]?.recommendedAction || '先处理高优先级缺口，或明确接受风险。',
+        targetType: 'capability_gap',
+        targetId: highGaps[0]?.id ?? dossier.canonicalFeature.id
+      })
+    );
+  }
+
+  if (dossier.focus.feature.status === 'blocked' && !hasUsefulText(details?.blocker)) {
+    checks.push(
+      readinessCheck({
+        id: 'blocked.reason',
+        label: '阻塞原因',
+        status: 'fail',
+        severity: 'high',
+        message: '功能处于 blocked，但没有结构化 blocker。',
+        hint: '补充 details.blocker 和 openQuestions。',
+        targetType: 'feature',
+        targetId: dossier.focus.feature.id
+      })
+    );
+  }
+
+  return checks;
+}
+
+function readinessCheck(input: FeatureReadinessCheck): FeatureReadinessCheck {
+  return input;
+}
+
+function featureReadinessScore(checks: FeatureReadinessCheck[]): number {
+  const penalty = checks.reduce((total, check) => {
+    if (check.status === 'pass') return total;
+    const base = check.status === 'fail' ? 14 : 6;
+    const severity = check.severity === 'high' ? 1.35 : check.severity === 'low' ? 0.65 : 1;
+    return total + Math.round(base * severity);
+  }, 0);
+  return Math.max(0, Math.min(100, 100 - penalty));
+}
+
+function featureReadinessStatus(dossier: FeatureDossierResult, checks: FeatureReadinessCheck[]): FeatureReadinessResult['readiness'] {
+  const failed = checks.filter((check) => check.status === 'fail');
+  if (dossier.focus.feature.status === 'blocked' || failed.some((check) => check.id === 'blocked.reason')) {
+    return 'blocked';
+  }
+  if (failed.some((check) => check.id === 'code.references' || check.id === 'evidence.code_fact' || check.id === 'quality.local_report')) {
+    return 'needs_evidence';
+  }
+  if (failed.some((check) => check.id.startsWith('axis.') || check.id === 'alignment.cross_map')) {
+    return 'needs_alignment';
+  }
+  if (failed.length > 0 || checks.some((check) => check.status === 'warn')) {
+    return 'needs_analysis';
+  }
+  return 'ready';
+}
+
+function featureReadinessNextSteps(dossier: FeatureDossierResult, qualityReport: QualityReportResult, checks: FeatureReadinessCheck[], missingAxes: MapAxis[]): string[] {
+  const steps = [
+    ...checks
+      .filter((check) => check.status !== 'pass')
+      .sort((left, right) => readinessSeverityRank(left.severity) - readinessSeverityRank(right.severity))
+      .slice(0, 6)
+      .map((check) => check.hint),
+    missingAxes.length > 0 ? `补齐缺失视角：${missingAxes.join(', ')}。` : '',
+    qualityReport.issues[0] ? `先处理质量问题：${qualityReport.issues[0].message}` : '',
+    dossier.selectedFocus?.nextSteps[0] ? `继续当前焦点下一步：${dossier.selectedFocus.nextSteps[0]}` : '',
+    '完成补充后再次调用 functree_get_feature_readiness。'
+  ].filter(Boolean);
+  return unique(steps).slice(0, 10);
+}
+
+function featureReadinessToolCalls(projectId: string, dossier: FeatureDossierResult, readiness: FeatureReadinessResult['readiness']): PreparedToolCall[] {
+  const focusReference = dossier.selectedFocus ? { focusId: dossier.selectedFocus.id } : { featureId: dossier.focus.feature.id };
+  const calls: PreparedToolCall[] = [
+    {
+      toolName: 'functree_get_feature_dossier',
+      priority: 'high',
+      reason: '读取完整功能档案，按产品意图、状态矩阵、证据、缺口和代码引用补齐 readiness 缺口。',
+      arguments: { projectId, ...focusReference, depth: 2 }
+    },
+    {
+      toolName: 'functree_get_programming_context',
+      priority: readiness === 'ready' ? 'medium' : 'high',
+      reason: readiness === 'ready' ? '功能信息已经较完整，可以读取编程行动上下文。' : '读取 seedPaths、入口、代码引用和推荐行动，定位该补哪些材料。',
+      arguments: { projectId, ...focusReference, depth: 2 }
+    },
+    {
+      toolName: 'functree_upsert_feature_dossier',
+      priority: readiness === 'ready' ? 'low' : 'high',
+      reason: '写回产品意图、实现切片、状态矩阵、证据、代码引用和缺口，让功能点从浅索引变成深档案。',
+      arguments: {
+        projectId,
+        canonicalMap: { id: dossier.canonicalMap.id, stableKey: dossier.canonicalMap.stableKey, name: dossier.canonicalMap.name },
+        canonicalFeature: { id: dossier.canonicalFeature.id, stableKey: dossier.canonicalFeature.stableKey, name: dossier.canonicalFeature.name }
+      }
+    }
+  ];
+  if (dossier.selectedFocus) {
+    calls.push({
+      toolName: 'functree_upsert_feature_focus',
+      priority: 'medium',
+      reason: '补齐分析后更新当前焦点的 findings、nextSteps、confidence 和状态。',
+      arguments: featureFocusUpdateArguments(projectId, dossier.selectedFocus)
+    });
+  }
+  return calls;
+}
+
+function readinessSeverityRank(severity: FeatureReadinessCheck['severity']): number {
+  if (severity === 'high') return 0;
+  if (severity === 'medium') return 1;
+  return 2;
+}
+
+function hasUsefulText(value: string | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
+function uniqueMapAxes(axes: MapAxis[]): MapAxis[] {
+  return Array.from(new Set(axes));
+}
+
+function isMapAxis(value: unknown): value is MapAxis {
+  return typeof value === 'string' && ['capability', 'product', 'web', 'backend', 'sdk', 'ops', 'data', 'test', 'docs', 'other'].includes(value);
+}
+
+function isScopedQualityReport(data: ParsedQualityReport): boolean {
+  return Boolean(data.focusId || data.focusStableKey || data.featureId || data.featureStableKey || data.mapId || data.mapStableKey);
+}
+
+function axisRank(axis: string): number {
+  return { product: 0, capability: 1, web: 2, backend: 3, sdk: 4, ops: 5, data: 6, test: 7, docs: 8, other: 9 }[axis] ?? 10;
+}
+
+function featureSearchTerms(query: string): string[] {
+  return unique(query.trim().toLowerCase().split(/[.\-_/\s]+/u).filter((term) => term.length > 0));
+}
+
+function stableKeyFromSearchQuery(query: string): string {
+  const stableKey = query
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, 120);
+  return stableKey || 'feature-focus';
+}
+
+function pathMatches(pathValue: string, queryPath: string, mode: string): boolean {
+  const path = pathValue.toLowerCase();
+  const needle = queryPath.toLowerCase();
+  if (mode === 'exact') return path === needle;
+  if (mode === 'prefix') return path.startsWith(needle);
+  return path.includes(needle);
+}
+
 function countBy<T>(items: T[], selector: (item: T) => string): Record<string, number> {
   return items.reduce<Record<string, number>>((counts, item) => {
     const key = selector(item);
@@ -3922,6 +6030,22 @@ function appendKeywordClause(where: string[], args: SQLInputValue[], alias: stri
   if (tokenClauses.length > 1) {
     for (const term of tokenTerms) {
       args.push(...columns.map(() => likePattern(term)));
+    }
+  }
+}
+
+function appendSearchExpressionsClause(where: string[], args: SQLInputValue[], expressions: string[], keyword: string): void {
+  const value = keyword.trim().toLowerCase();
+  if (!value) return;
+  const tokenTerms = featureSearchTerms(value);
+  const expressionClauses = expressions.map((expression) => `LOWER(COALESCE(${expression}, '')) LIKE ? ESCAPE '\\'`);
+  const fullClause = `(${expressionClauses.join(' OR ')})`;
+  const tokenClauses = tokenTerms.map(() => `(${expressionClauses.join(' OR ')})`);
+  where.push(tokenClauses.length > 1 ? `(${fullClause} OR (${tokenClauses.join(' AND ')}))` : fullClause);
+  args.push(...expressions.map(() => likePattern(value)));
+  if (tokenClauses.length > 1) {
+    for (const term of tokenTerms) {
+      args.push(...expressions.map(() => likePattern(term)));
     }
   }
 }
@@ -3998,7 +6122,7 @@ function toLiteRow(type: QueryContextType, row: Record<string, unknown>): QueryL
   return {
     id: String(row.id),
     stableKey: typeof row.stableKey === 'string' && row.stableKey ? row.stableKey : undefined,
-    name: typeof row.name === 'string' ? row.name : undefined,
+    name: typeof row.name === 'string' ? row.name : typeof row.title === 'string' ? row.title : undefined,
     type,
     mapId: typeof row.mapId === 'string' ? row.mapId : row.mapId === null ? null : undefined,
     projectId: typeof row.projectId === 'string' ? row.projectId : undefined,
@@ -4025,6 +6149,15 @@ function featureCandidate(feature: FeatureRow): { id: string; stableKey: string;
     mapId: feature.mapId,
     version: feature.version,
     name: feature.name
+  };
+}
+
+function featureFocusCandidate(focus: FeatureFocusRow): { id: string; stableKey: string; mapId?: string | null; version?: string; name?: string } {
+  return {
+    id: focus.id,
+    stableKey: focus.stableKey,
+    mapId: focus.map?.id ?? null,
+    name: focus.title
   };
 }
 
@@ -4104,6 +6237,45 @@ function batchSummary<T>(results: Array<UpsertResult<T>>, errors: unknown[]): Ba
     unchanged: results.filter((result) => result.operation === 'unchanged').length,
     dryRun: results.filter((result) => result.operation === 'dry_run').length,
     errors: errors.length
+  };
+}
+
+function markFeatureDossierDryRun(result: FeatureDossierUpsertResult): FeatureDossierUpsertResult {
+  return {
+    ...result,
+    dryRun: true,
+    rolledBack: true,
+    operations: {
+      maps: result.operations.maps.map(markOperationDryRun),
+      features: result.operations.features.map(markOperationDryRun),
+      entryPoints: result.operations.entryPoints.map(markOperationDryRun),
+      codeReferences: result.operations.codeReferences.map(markOperationDryRun),
+      evidence: result.operations.evidence.map(markOperationDryRun),
+      statuses: result.operations.statuses.map(markOperationDryRun),
+      gaps: result.operations.gaps.map(markOperationDryRun),
+      alignments: result.operations.alignments.map(markOperationDryRun)
+    }
+  };
+}
+
+function markFeatureFocusStartDryRun(result: FeatureFocusStartResult): FeatureFocusStartResult {
+  return {
+    ...result,
+    dryRun: true,
+    rolledBack: true,
+    map: markOperationDryRun(result.map),
+    feature: markOperationDryRun(result.feature),
+    focus: markOperationDryRun(result.focus)
+  };
+}
+
+function markOperationDryRun<T>(result: UpsertResult<T>): UpsertResult<T> {
+  const dataId = typeof result.data === 'object' && result.data && 'id' in result.data ? String((result.data as { id: unknown }).id) : undefined;
+  return {
+    ...result,
+    operation: 'dry_run',
+    dryRun: true,
+    previewId: result.previewId ?? (result.operation === 'created' ? dataId : undefined)
   };
 }
 

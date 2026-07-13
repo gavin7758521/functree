@@ -15,6 +15,8 @@ GET /api/overview
 GET /api/catalog
 ```
 
+`/overview` 的 `totals` 包含项目、功能地图、功能、入口、代码引用、对齐、扫描，以及 `featureFocuses` / `openFeatureFocuses`，用于判断当前是否有可续接的单功能工作队列。
+
 ## 项目
 
 ```http
@@ -23,9 +25,39 @@ POST /api/projects
 GET /api/projects/:projectId
 GET /api/projects/:projectId/tree
 GET /api/projects/:projectId/summary
+POST /api/projects/:projectId/feature-dossier
+POST /api/projects/:projectId/feature-readiness
+POST /api/projects/:projectId/feature-dossier/upsert
+GET /api/projects/:projectId/feature-focuses
+POST /api/projects/:projectId/feature-focuses/start
+POST /api/projects/:projectId/feature-focuses
+POST /api/projects/:projectId/programming-context
+POST /api/projects/:projectId/feature-work/prepare
+POST /api/projects/:projectId/features/search
+GET /api/projects/:projectId/quality-report
 ```
 
 `/tree` 返回项目、功能地图、功能树、入口文件、代码引用和对齐关系。
+
+`/summary` 返回项目级统计，包括功能地图、功能、入口文件、代码引用、evidence、对齐、扫描、`featureFocusCount`、`openFeatureFocusCount`、`latestFeatureFocus`、最近更新时间、最近扫描、stableKey 冲突数和孤儿代码引用数。
+
+`/feature-dossier` 是功能优先读取入口。请求体传 `focusId/focusStableKey`、`featureId`，或 `featureStableKey + mapId/mapStableKey`，返回焦点功能、canonical feature、`selectedFocus`、功能焦点列表、实现状态矩阵、缺口/冲突、证据、代码引用、入口文件和质量问题。
+
+`/feature-readiness` 是单功能深挖后的就绪度检查入口。请求体传 `focusId/focusStableKey`、`featureId`，或 `featureStableKey + mapId/mapStableKey`，可选 `requiredAxes`，返回 `readiness`、`score`、跨视角覆盖、缺失维度、检查清单、下一步和 `recommendedToolCalls`。它用于判断当前功能点是否已经足够清楚，还是还缺产品意图、范围、当前/目标行为、代码引用、`code_fact` 证据、状态矩阵、显式缺口、验收条件或 mock 边界。
+
+`/feature-dossier/upsert` 是功能优先写入入口。请求体传 `canonicalMap`、`canonicalFeature`、可选 `implementationSlices`、`canonicalEvidence`、`gaps` 和 `dryRun`，服务端会聚合写入既有 maps/features/statuses/gaps/evidence/entry-points/code-references/alignments。
+
+`/feature-focuses` 是功能优先工作流入口。`GET` 支持 `featureId` 或 `featureStableKey + mapStableKey/mapId` 过滤；`POST` 创建或更新一次围绕单个功能的分析焦点，可写入 `title`、`mode`、`status`、`priority`、`sourceType`、`question`、`scope`、`sourceRefs`、`seedPaths`、`targetMaps`、`relatedFeatures`、`nextSteps`、`findings` 和 `confidence`。它用于记录“这次只深挖哪个功能、从哪里开始、下一步扩展到哪里”。
+
+`/feature-focuses/start` 用于目标功能尚未存在时启动单功能深挖。请求体传 `canonicalMap`、`canonicalFeature`、可选 `focus` 和 `dryRun`，服务端会先 upsert canonical map/feature，再创建或更新功能焦点，并返回当前 feature dossier。
+
+`/programming-context` 是 AI 编程前的窄读取入口。请求体传 `focusId/focusStableKey`、`featureId`，或 `featureStableKey + mapId/mapStableKey`，可用 `include` 控制返回段落；默认会返回 `selectedFocus`、active feature focuses、seedPathContexts、由焦点/seedPaths/缺口/质量问题/验证线索派生的 `nextActions`、必读入口、关键代码引用、对齐关系、影响功能、证据、验收项和风险。
+
+`/feature-work/prepare` 是单功能开工入口。请求体可传 `focusId`、`focusStableKey`、`featureId`、`featureStableKey`，或 `query/path`；服务端会优先恢复已存在的功能焦点，否则按指定功能或搜索线索判断候选可信度。可信时返回 `readiness: "ready"`、`selectedFocus`、选中候选、feature dossier、AI 编程上下文、下一步和 `recommendedToolCalls`；不可信时返回 `ambiguous` 或 `needs_start`、`suggestedStart` 和建议工具调用。
+
+`/features/search` 是功能优先发现入口。请求体传 `query` 或 `path`，可选 `mapId/mapStableKey`、`axes`、`statuses` 和 `limit`，返回候选功能、所在 map、匹配原因、已有焦点、开放缺口、匹配代码引用和下一步建议。
+
+`/quality-report` 返回项目、功能地图、单个功能或功能焦点范围内的覆盖缺口。查询参数可传 `focusId/focusStableKey`、`featureId/featureStableKey`、`mapId/mapStableKey`、`repoRoot` 和 `includePathChecks`，用于单功能同步后只检查当前工作范围。
 
 ## 功能地图
 
@@ -118,7 +150,7 @@ GET /api/query
 
 `functree_query_context` 支持：
 
-- `types`: `project` / `map` / `feature` / `alignment` / `entry_point` / `code_reference`
+- `types`: `project` / `map` / `feature` / `feature_focus` / `alignment` / `entry_point` / `code_reference` / `evidence`
 - `view`: `full` / `lite`
 - `includeSummaryOnly`
 - `includeMembers`
@@ -134,7 +166,7 @@ GET /api/query
 - `pathMode`: `contains` / `exact` / `prefix`
 - `offset` / `cursor`
 
-返回包含 `projects`、`maps`、`features`、`entryPoints`、`codeReferences`、`alignments`、`page` 和 `summary`。`summary` 包含功能地图数、功能数、入口文件数、代码引用数、对齐关系数、扫描数、最近扫描、最近更新时间、stableKey 冲突数和孤儿代码引用数。
+返回包含 `projects`、`maps`、`features`、`featureFocuses`、`entryPoints`、`codeReferences`、`evidence`、`alignments`、`page` 和 `summary`。`summary` 包含功能地图数、功能数、入口文件数、代码引用数、对齐关系数、功能焦点数、开放功能焦点数、最近功能焦点、扫描数、最近扫描、最近更新时间、stableKey 冲突数和孤儿代码引用数。
 
 ## 错误格式
 

@@ -7,16 +7,24 @@ import {
   CreateCodeReferenceSchema,
   CreateEntryPointSchema,
   CreateEvidenceSchema,
+  CreateFeatureFocusSchema,
   CreateFeatureSchema,
   CreateMapSchema,
   CreateProjectSchema,
   FinishScanSchema,
+  FeatureDossierSchema,
+  FeatureReadinessSchema,
   ProgrammingContextSchema,
+  PrepareFeatureWorkSchema,
   ProjectSummarySchema,
   QualityReportSchema,
+  QueryFeatureFocusesSchema,
   QueryPathContextSchema,
   QueryContextSchema,
   ResolveStableKeysSchema,
+  SearchFeaturesSchema,
+  StartFeatureFocusSchema,
+  UpsertFeatureDossierSchema,
   labels
 } from '@functree/domain';
 import fastify, { type FastifyInstance } from 'fastify';
@@ -97,6 +105,30 @@ export function createHttpServer(db: Db): FastifyInstance {
   app.get('/api/projects/:projectId/summary', async (request) => repo.projectSummary(ProjectSummarySchema.parse({ projectId: params(request).projectId })));
   app.post('/api/projects/:projectId/programming-context', async (request) =>
     repo.programmingContext(ProgrammingContextSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/feature-work/prepare', async (request) =>
+    repo.prepareFeatureWork(PrepareFeatureWorkSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/features/search', async (request) =>
+    repo.searchFeatures(SearchFeaturesSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/feature-dossier', async (request) =>
+    repo.featureDossier(FeatureDossierSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/feature-readiness', async (request) =>
+    repo.featureReadiness(FeatureReadinessSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/feature-dossier/upsert', async (request) =>
+    repo.upsertFeatureDossier(UpsertFeatureDossierSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.get('/api/projects/:projectId/feature-focuses', async (request) =>
+    repo.listFeatureFocuses(QueryFeatureFocusesSchema.parse({ ...(request.query as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/feature-focuses/start', async (request) =>
+    repo.startFeatureFocus(StartFeatureFocusSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
+  );
+  app.post('/api/projects/:projectId/feature-focuses', async (request) =>
+    repo.upsertFeatureFocus(params(request).projectId, CreateFeatureFocusSchema.parse({ ...(request.body as Record<string, unknown>), projectId: params(request).projectId }))
   );
   app.get('/api/projects/:projectId/quality-report', async (request) =>
     repo.qualityReport(QualityReportSchema.parse({ ...(request.query as Record<string, unknown>), projectId: params(request).projectId }))

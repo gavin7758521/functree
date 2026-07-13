@@ -6,6 +6,7 @@ export type Catalog = {
     mapKind: Record<string, string>;
     mapStatus: Record<string, string>;
     featureStatus: Record<string, string>;
+    featureKind: Record<string, string>;
     entryPointKind: Record<string, string>;
     codeReferenceKind: Record<string, string>;
     codeReferenceRoleInFeature: Record<string, string>;
@@ -15,6 +16,10 @@ export type Catalog = {
     capabilityGapType: Record<string, string>;
     capabilityGapSeverity: Record<string, string>;
     capabilityGapStatus: Record<string, string>;
+    featureFocusMode: Record<string, string>;
+    featureFocusStatus: Record<string, string>;
+    featureFocusPriority: Record<string, string>;
+    featureFocusSourceType: Record<string, string>;
     alignmentRelation: Record<string, string>;
     alignmentStatus: Record<string, string>;
   };
@@ -117,6 +122,8 @@ export type Evidence = {
   targetType: string;
   targetId: string;
   evidenceType: string;
+  sourceType: string;
+  sourcePriority: number;
   path: string;
   symbol: string;
   lineStart: number | null;
@@ -126,6 +133,43 @@ export type Evidence = {
   commitSha: string;
   verifiedAt: string;
   label?: string;
+};
+
+export type CapabilityStatus = {
+  id: string;
+  projectId: string;
+  canonicalFeatureId: string;
+  mapId: string;
+  featureId: string | null;
+  status: string;
+  summary: string;
+  gaps: string[];
+  recommendedAction: string;
+  evidenceIds: string[];
+  canonicalFeature?: Feature;
+  map?: FuncMap;
+  feature?: Feature | null;
+};
+
+export type CapabilityGap = {
+  id: string;
+  projectId: string;
+  stableKey: string;
+  canonicalFeatureId: string;
+  mapId: string | null;
+  featureId: string | null;
+  gapType: string;
+  severity: 'high' | 'medium' | 'low';
+  status: string;
+  title: string;
+  description: string;
+  evidenceIds: string[];
+  recommendedAction: string;
+  ownerMapId: string | null;
+  canonicalFeature?: Feature;
+  map?: FuncMap | null;
+  feature?: Feature | null;
+  ownerMap?: FuncMap | null;
 };
 
 export type Alignment = {
@@ -146,6 +190,106 @@ export type Alignment = {
   }>;
 };
 
+export type FeatureFocus = {
+  id: string;
+  projectId: string;
+  stableKey: string;
+  featureId: string;
+  title: string;
+  mode: string;
+  status: string;
+  priority: string;
+  sourceType: string;
+  question: string;
+  scope: string;
+  sourceRefs: string[];
+  seedPaths: string[];
+  targetMapIds: string[];
+  relatedFeatureIds: string[];
+  nextSteps: string[];
+  findings: string;
+  confidence: number;
+  feature?: Feature;
+  map?: FuncMap;
+  targetMaps?: FuncMap[];
+  relatedFeatures?: Feature[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FeatureFocusStartResult = {
+  success: boolean;
+  dryRun: boolean;
+  rolledBack: boolean;
+  map: {
+    operation: string;
+    data: FuncMap;
+  };
+  feature: {
+    operation: string;
+    data: Feature;
+  };
+  focus: {
+    operation: string;
+    data: FeatureFocus;
+  };
+  dossier: FeatureDossier;
+};
+
+export type FeatureSearchCandidate = {
+    feature: Feature;
+    map: FuncMap;
+    score: number;
+    reasons: string[];
+    openFocuses: FeatureFocus[];
+    codeReferenceCount: number;
+    matchingCodeReferences: CodeReference[];
+    gapCount: number;
+    openGaps: CapabilityGap[];
+    alignmentCount: number;
+    nextAction: string;
+};
+
+export type FeatureSearchResult = {
+  project: Project;
+  query: string;
+  path: string;
+  candidates: FeatureSearchCandidate[];
+  suggestedStart: {
+    canonicalMapStableKey: string;
+    canonicalFeatureStableKey: string;
+    featureName: string;
+    reason: string;
+  } | null;
+  page: {
+    limit: number;
+    candidateCount: number;
+  };
+  summary: {
+    openFocusCount: number;
+    exactStableKeyMatches: number;
+    codeReferenceMatches: number;
+  };
+};
+
+export type PreparedFeatureWork = {
+  project: Project;
+  readiness: 'ready' | 'ambiguous' | 'needs_start';
+  search: FeatureSearchResult | null;
+  selectedCandidate: FeatureSearchCandidate | null;
+  selectedFocus: FeatureFocus | null;
+  dossier: FeatureDossier | null;
+  programmingContext: ProgrammingContext | null;
+  suggestedStart: FeatureSearchResult['suggestedStart'];
+  nextSteps: string[];
+  recommendedToolCalls: Array<{
+    toolName: string;
+    priority: 'high' | 'medium' | 'low';
+    reason: string;
+    arguments: Record<string, unknown>;
+  }>;
+};
+
 export type Overview = {
   projects: Project[];
   totals: {
@@ -155,6 +299,9 @@ export type Overview = {
     entryPoints: number;
     codeReferences: number;
     alignments: number;
+    featureFocuses: number;
+    openFeatureFocuses: number;
+    scanRuns: number;
   };
 };
 
@@ -165,4 +312,132 @@ export type ProjectTree = {
   codeReferences: CodeReference[];
   evidence: Evidence[];
   alignments: Alignment[];
+};
+
+export type FeatureDossier = {
+  project: Project;
+  focus: {
+    feature: Feature;
+    map: FuncMap;
+  };
+  canonicalFeature: Feature;
+  canonicalMap: FuncMap;
+  statusMatrix: {
+    statuses: CapabilityStatus[];
+    gaps: CapabilityGap[];
+    evidence: Evidence[];
+    summary: {
+      statusCounts: Record<string, number>;
+      openGapCount: number;
+      highSeverityGapCount: number;
+    };
+  } | null;
+  implementationSlices: CapabilityStatus[];
+  gaps: CapabilityGap[];
+  evidence: Evidence[];
+  codeReferences: CodeReference[];
+  entryPoints: EntryPoint[];
+  alignments: Alignment[];
+  relatedFeatures: Feature[];
+  selectedFocus: FeatureFocus | null;
+  focuses: FeatureFocus[];
+  qualityIssues: Array<{
+    severity: 'error' | 'warning' | 'info';
+    code: string;
+    targetType: string;
+    targetId: string;
+    message: string;
+    hint: string;
+  }>;
+  summary: {
+    isCanonical: boolean;
+    statusCounts: Record<string, number>;
+    evidenceSourceCounts: Record<string, number>;
+    openGapCount: number;
+    highSeverityGapCount: number;
+    codeReferenceCount: number;
+    entryPointCount: number;
+    alignmentCount: number;
+    relatedFeatureCount: number;
+    openFocusCount: number;
+  };
+};
+
+export type ProgrammingContext = {
+  project: Project;
+  map: FuncMap;
+  feature: Feature;
+  details: FeatureDetail | null;
+  selectedFocus: FeatureFocus | null;
+  focuses: FeatureFocus[];
+  seedPathContexts: Array<{
+    projectId: string;
+    path: string;
+    pathMode: string;
+    entryPoints: EntryPoint[];
+    codeReferences: CodeReference[];
+    maps: FuncMap[];
+    features: Feature[];
+    alignments: Alignment[];
+  }>;
+  nextActions: Array<{
+    priority: 'high' | 'medium' | 'low';
+    source: string;
+    title: string;
+    detail: string;
+    targetType: string;
+    targetId: string;
+  }>;
+  requiredEntryPoints: EntryPoint[];
+  keyCodeReferences: CodeReference[];
+  relatedProductCapabilities: Feature[];
+  alignments: Alignment[];
+  impactedFeatures: Feature[];
+  evidence: Evidence[];
+  capabilityMatrix: FeatureDossier['statusMatrix'];
+  capabilityGaps: CapabilityGap[];
+  risks: string[];
+  acceptanceCriteria: string[];
+  verification: string[];
+  qualityIssues: FeatureDossier['qualityIssues'];
+};
+
+export type FeatureReadiness = {
+  project: Project;
+  map: FuncMap;
+  feature: Feature;
+  selectedFocus: FeatureFocus | null;
+  readiness: 'ready' | 'needs_analysis' | 'needs_evidence' | 'needs_alignment' | 'blocked';
+  score: number;
+  requiredAxes: string[];
+  axisCoverage: Array<{
+    axis: string;
+    status: 'covered' | 'missing' | 'partial';
+    maps: FuncMap[];
+    implementationStatuses: CapabilityStatus[];
+  }>;
+  checks: Array<{
+    id: string;
+    label: string;
+    status: 'pass' | 'warn' | 'fail';
+    severity: 'high' | 'medium' | 'low';
+    message: string;
+    hint: string;
+    targetType?: string;
+    targetId?: string;
+  }>;
+  missingAxes: string[];
+  nextSteps: string[];
+  recommendedToolCalls: Array<{
+    toolName: string;
+    priority: 'high' | 'medium' | 'low';
+    reason: string;
+    arguments: Record<string, unknown>;
+  }>;
+  dossier: FeatureDossier;
+  qualityReport: {
+    projectId: string;
+    summary: Record<string, number>;
+    issues: FeatureDossier['qualityIssues'];
+  };
 };

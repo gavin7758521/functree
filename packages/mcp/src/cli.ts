@@ -49,13 +49,15 @@ const alignmentRoles = ['source', 'target', 'peer', 'evidence'] as const;
 const evidenceTypes = ['code_fact', 'doc_claim', 'inferred', 'planned', 'mock_only', 'deprecated'] as const;
 const evidenceSourceTypes = ['runtime_code', 'test', 'api_route', 'migration_schema', 'product_prototype', 'docs', 'inference'] as const;
 const evidenceTargetTypes = ['map', 'feature', 'alignment', 'entry_point', 'code_reference', 'capability_status', 'capability_gap'] as const;
+const featureDossierEvidenceTargets = ['canonical_feature', 'implementation_feature', 'status'] as const;
 const codeReferenceRoles = ['entry', 'core_logic', 'permission_check', 'storage', 'rendering', 'configuration', 'test', 'contract', 'adapter', 'other'] as const;
-const queryContextTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence'] as const;
+const queryContextTypes = ['project', 'map', 'feature', 'feature_focus', 'alignment', 'entry_point', 'code_reference', 'evidence'] as const;
 const queryContextViews = ['full', 'lite'] as const;
 const pathMatchModes = ['contains', 'exact', 'prefix'] as const;
-const resolveStableKeyTypes = ['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference'] as const;
+const resolveStableKeyTypes = ['project', 'map', 'feature', 'feature_focus', 'alignment', 'entry_point', 'code_reference'] as const;
 const scanRunStatuses = ['completed', 'failed', 'cancelled'] as const;
-const programmingContextIncludes = ['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality', 'statusMatrix', 'gaps'] as const;
+const programmingContextIncludes = ['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality', 'statusMatrix', 'gaps', 'focuses', 'seedPathContexts'] as const;
+const featureDossierIncludes = ['details', 'codeReferences', 'entryPoints', 'alignments', 'evidence', 'statusMatrix', 'gaps', 'relatedFeatures', 'quality', 'focuses'] as const;
 const capabilityStatuses = ['unknown', 'none', 'not_needed', 'prototype', 'spec', 'approved', 'mock', 'partial', 'live', 'configured', 'deployed', 'deprecated'] as const;
 const capabilityGapTypes = [
   'naming_conflict',
@@ -74,6 +76,10 @@ const capabilityGapTypes = [
 ] as const;
 const capabilityGapSeverities = ['high', 'medium', 'low'] as const;
 const capabilityGapStatuses = ['open', 'accepted', 'resolved', 'ignored'] as const;
+const featureFocusModes = ['discover', 'analyze', 'implement', 'verify', 'maintain'] as const;
+const featureFocusStatuses = ['open', 'in_progress', 'paused', 'ready_for_implementation', 'implemented', 'closed', 'archived'] as const;
+const featureFocusPriorities = ['high', 'medium', 'low'] as const;
+const featureFocusSourceTypes = ['user_request', 'product_doc', 'code_scan', 'bug', 'refactor', 'research', 'other'] as const;
 
 type Config = {
   serverUrl: string;
@@ -183,7 +189,7 @@ const codeReferenceItemShape = {
 };
 
 const resolveStableKeyItemSchema = z.object({
-  type: z.enum(resolveStableKeyTypes).describe('Object type to resolve.'),
+  type: z.enum(resolveStableKeyTypes).describe('Object type to resolve, including feature_focus for resuming focused work.'),
   id: z.string().optional().describe('Optional concrete ID to validate within this project.'),
   stableKey: z.string().optional().describe('Stable key to resolve.'),
   mapId: z.string().optional().describe('Optional map ID for feature disambiguation.'),
@@ -267,6 +273,202 @@ const capabilityGapItemShape = {
   metadata: metadataSchema
 };
 
+const featureFocusMapReferenceSchema = z.object({
+  mapId: z.string().optional().describe('Target map ID.'),
+  mapStableKey: z.string().optional().describe('Target map stableKey, preferred for remote agents.')
+});
+
+const featureFocusFeatureReferenceSchema = z.object({
+  featureId: z.string().optional().describe('Related feature ID.'),
+  featureStableKey: z.string().optional().describe('Related feature stableKey, preferred for remote agents.'),
+  mapId: z.string().optional().describe('Optional map ID used to disambiguate featureStableKey.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey used to disambiguate featureStableKey.'),
+  version: z.string().optional().describe('Optional feature version.')
+});
+
+const featureFocusShape = {
+  id: z.string().optional().describe('Optional concrete feature focus ID.'),
+  stableKey: z.string().optional().describe('Stable focus key. If omitted, FuncTree derives one from the feature stableKey and title.'),
+  featureId: z.string().optional().describe('Feature ID this focus is about.'),
+  featureStableKey: z.string().optional().describe('Feature stableKey this focus is about. Use mapStableKey/mapId if ambiguous.'),
+  mapId: z.string().optional().describe('Optional map ID used to resolve featureStableKey.'),
+  mapStableKey: z.string().optional().describe('Optional map stableKey used to resolve featureStableKey.'),
+  featureVersion: z.string().optional().describe('Optional feature version used to resolve featureStableKey.'),
+  title: z.string().describe('Short focus title, for example "Make add external AI real".'),
+  mode: z.enum(featureFocusModes).optional().describe('Focus mode: discover/analyze/implement/verify/maintain. Defaults to analyze.'),
+  status: z.enum(featureFocusStatuses).optional().describe('Workflow status. Defaults to open.'),
+  priority: z.enum(featureFocusPriorities).optional().describe('Priority. Defaults to medium.'),
+  sourceType: z.enum(featureFocusSourceTypes).optional().describe('Where this focus came from: user_request/product_doc/code_scan/bug/refactor/research/other.'),
+  question: z.string().optional().describe('The concrete question or task this focus is trying to answer.'),
+  scope: z.string().optional().describe('Scope boundary for this focused analysis.'),
+  sourceRefs: z.array(z.string()).max(100).optional().describe('Product docs, tickets, URLs, prompt snippets, or note references that initiated this focus.'),
+  seedPaths: z.array(z.string()).max(100).optional().describe('Initial code/doc paths to inspect before expanding.'),
+  targetMaps: z.array(featureFocusMapReferenceSchema).max(50).optional().describe('Maps this focus should expand into, such as product/web/backend/sdk/ops.'),
+  relatedFeatures: z.array(featureFocusFeatureReferenceSchema).max(100).optional().describe('Features discovered as adjacent or downstream context.'),
+  nextSteps: z.array(z.string()).max(80).optional().describe('Concrete next steps for the next analysis or implementation pass.'),
+  findings: z.string().optional().describe('Current distilled findings for this focused analysis.'),
+  confidence: z.number().min(0).max(1).optional().describe('Confidence in the current focus findings. Defaults to 0.5.'),
+  metadata: metadataSchema
+};
+
+const dossierCanonicalMapShape = {
+  id: z.string().optional().describe('Optional concrete canonical map ID.'),
+  stableKey: z.string().describe('Canonical map stableKey, for example product.ai-assistant or capability.chat.'),
+  name: z.string().describe('Canonical map display name.'),
+  version: z.string().optional().describe('Map version. Defaults to 当前.'),
+  axis: z.enum(mapAxes).optional().describe('Defaults to product. Use capability when this is a pure capability map.'),
+  scope: z.enum(mapScopes).optional().describe('Defaults to capability.'),
+  kind: z.enum(mapKinds).optional().describe('Defaults to domain.'),
+  status: z.enum(mapStatuses).optional().describe('Defaults to normal.'),
+  description: z.string().optional(),
+  owner: z.string().optional(),
+  tags: tagsSchema,
+  metadata: metadataSchema
+};
+
+const dossierSliceMapShape = {
+  id: z.string().optional().describe('Optional concrete implementation map ID.'),
+  stableKey: z.string().describe('Implementation map stableKey, for example web.ai-assistant, backend.airoom-bots, sdk.public-user-sdk, or ops.deployment.'),
+  name: z.string().describe('Implementation map display name.'),
+  version: z.string().optional().describe('Map version. Defaults to 当前.'),
+  axis: z.enum(mapAxes).describe('Implementation axis: product/web/backend/sdk/ops/data/test/docs/etc.'),
+  scope: z.enum(mapScopes).optional().describe('Defaults to implementation.'),
+  kind: z.enum(mapKinds).optional().describe('Defaults to module.'),
+  status: z.enum(mapStatuses).optional().describe('Defaults to normal.'),
+  description: z.string().optional(),
+  owner: z.string().optional(),
+  tags: tagsSchema,
+  metadata: metadataSchema
+};
+
+const dossierFeatureShape = {
+  id: z.string().optional().describe('Optional concrete feature ID.'),
+  stableKey: z.string().describe('Feature stableKey inside its map.'),
+  name: z.string().describe('Feature display name.'),
+  version: z.string().optional().describe('Feature version. Defaults to 当前.'),
+  status: z.enum(featureStatuses).optional().describe('Feature lifecycle status. Defaults to draft.'),
+  kind: z.enum(featureKinds).optional().describe('Feature kind. Defaults to capability.'),
+  description: z.string().optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+  tags: tagsSchema,
+  details: featureDetailsSchema.optional(),
+  metadata: metadataSchema
+};
+
+const startFeatureFocusShape = {
+  projectId: z.string().describe('Project ID.'),
+  canonicalMap: z.object(dossierCanonicalMapShape).describe('Product/capability map to create or update for the canonical feature.'),
+  canonicalFeature: z.object(dossierFeatureShape).describe('Canonical feature to create or update before starting the focus.'),
+  focus: z
+    .object({
+      id: z.string().optional().describe('Optional concrete feature focus ID.'),
+      stableKey: z.string().optional().describe('Stable focus key. If omitted, FuncTree derives one from the feature stableKey and title.'),
+      title: z.string().optional().describe('Short focus title. Defaults to "深挖 <feature name>".'),
+      mode: z.enum(featureFocusModes).optional().describe('Focus mode: discover/analyze/implement/verify/maintain. Defaults to analyze.'),
+      status: z.enum(featureFocusStatuses).optional().describe('Workflow status. Defaults to open.'),
+      priority: z.enum(featureFocusPriorities).optional().describe('Priority. Defaults to medium.'),
+      sourceType: z.enum(featureFocusSourceTypes).optional().describe('Where this focus came from.'),
+      question: z.string().optional().describe('The concrete question or task this focus is trying to answer.'),
+      scope: z.string().optional().describe('Scope boundary for this focused analysis.'),
+      sourceRefs: z.array(z.string()).max(100).optional().describe('Product docs, tickets, URLs, prompt snippets, or note references that initiated this focus.'),
+      seedPaths: z.array(z.string()).max(100).optional().describe('Initial code/doc paths to inspect before expanding.'),
+      targetMaps: z.array(featureFocusMapReferenceSchema).max(50).optional().describe('Maps this focus should expand into, such as product/web/backend/sdk/ops.'),
+      relatedFeatures: z.array(featureFocusFeatureReferenceSchema).max(100).optional().describe('Features discovered as adjacent or downstream context.'),
+      nextSteps: z.array(z.string()).max(80).optional().describe('Concrete next steps for the next analysis or implementation pass.'),
+      findings: z.string().optional().describe('Current distilled findings for this focused analysis.'),
+      confidence: z.number().min(0).max(1).optional().describe('Confidence in the current focus findings. Defaults to 0.5.'),
+      metadata: metadataSchema
+    })
+    .optional()
+    .describe('Focus workflow metadata.'),
+  dryRun: dryRunSchema
+};
+
+const dossierEvidenceShape = {
+  id: z.string().optional().describe('Optional evidence ID.'),
+  target: z.enum(featureDossierEvidenceTargets).optional().describe('Where to attach evidence in this dossier. Defaults to implementation_feature inside implementation slices and canonical_feature for canonicalEvidence.'),
+  evidenceType: z.enum(evidenceTypes).describe('Evidence type: code_fact/doc_claim/inferred/planned/mock_only/deprecated.'),
+  path: z.string().optional(),
+  symbol: z.string().optional(),
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional(),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional(),
+  summary: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  sourceType: z.enum(evidenceSourceTypes).optional(),
+  sourcePriority: z.number().int().min(1).max(100).optional(),
+  commitSha: z.string().optional(),
+  verifiedAt: z.string().optional(),
+  metadata: metadataSchema
+};
+
+const dossierGapEvidenceShape = {
+  id: z.string().optional().describe('Optional evidence ID.'),
+  evidenceType: z.enum(evidenceTypes).describe('Evidence type: code_fact/doc_claim/inferred/planned/mock_only/deprecated.'),
+  path: z.string().optional(),
+  symbol: z.string().optional(),
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional(),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional(),
+  summary: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  sourceType: z.enum(evidenceSourceTypes).optional(),
+  sourcePriority: z.number().int().min(1).max(100).optional(),
+  commitSha: z.string().optional(),
+  verifiedAt: z.string().optional(),
+  metadata: metadataSchema
+};
+
+const dossierEntryPointShape = {
+  id: z.string().optional(),
+  stableKey: z.string().describe('Entry point stableKey.'),
+  name: z.string().describe('Entry point display name.'),
+  path: z.string().describe('Repository path or config path.'),
+  kind: z.enum(entryPointKinds),
+  description: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  scanRunId: z.string().optional(),
+  metadata: metadataSchema
+};
+
+const dossierCodeReferenceShape = {
+  id: z.string().optional(),
+  entryPointId: z.string().optional(),
+  entryPointStableKey: z.string().optional(),
+  stableKey: z.string().optional(),
+  path: z.string().describe('Repository file path or document path.'),
+  symbol: z.string().optional(),
+  kind: z.enum(codeReferenceKinds),
+  description: z.string().optional(),
+  roleInFeature: z.enum(codeReferenceRoles).optional(),
+  changeGuidance: z.string().optional(),
+  verificationHint: z.string().optional(),
+  blastRadius: z.string().optional(),
+  lineStart: z.number().int().min(1).max(1000000).nullable().optional(),
+  lineEnd: z.number().int().min(1).max(1000000).nullable().optional(),
+  scanRunId: z.string().optional(),
+  metadata: metadataSchema
+};
+
+const dossierGapShape = {
+  id: z.string().optional(),
+  stableKey: z.string().optional(),
+  mapId: z.string().optional(),
+  mapStableKey: z.string().optional(),
+  featureId: z.string().optional(),
+  featureStableKey: z.string().optional(),
+  featureVersion: z.string().optional(),
+  title: z.string().describe('Gap/conflict title.'),
+  gapType: z.enum(capabilityGapTypes),
+  severity: z.enum(capabilityGapSeverities).optional(),
+  status: z.enum(capabilityGapStatuses).optional(),
+  description: z.string().optional(),
+  evidenceIds: z.array(z.string()).max(100).optional(),
+  evidence: z.array(z.object(dossierGapEvidenceShape)).max(100).optional().describe('Inline evidence attached directly to this gap as capability_gap evidence.'),
+  recommendedAction: z.string().optional(),
+  ownerMapId: z.string().optional(),
+  ownerMapStableKey: z.string().optional(),
+  metadata: metadataSchema
+};
+
 const config = readConfig(process.argv.slice(2), process.env);
 
 const server = new McpServer(
@@ -277,8 +479,15 @@ const server = new McpServer(
   {
     instructions: [
       'FuncTree is a remote feature knowledge-base service for software projects.',
-      'Use it after analyzing a repository to record Project -> Map -> Feature structure, important entry points, code references, and cross-layer alignments.',
-      'Maps are first-class views such as product.chat, web.chat-ui, backend.matrix-chat-core, sdk.public-user-sdk, or ops.deployment.',
+      'Treat Feature as the primary object. Start from the specific feature the user wants to understand or change, then expand into product, web, backend, SDK, ops, evidence, gaps, and maps as context.',
+      'Use functree_prepare_feature_work first when the user wants to understand or change one feature from an existing focus, feature name, requirement fragment, stableKey, or code path. It returns the selected focus/candidate, feature dossier, programming context, and recommendedToolCalls when ready, or a start suggestion when the feature is missing.',
+      'Use functree_search_features when you need just the ranked candidate list. If it returns a strong candidate, continue from that feature; if it returns suggestedStart, use functree_start_feature_focus.',
+      'Use functree_start_feature_focus when the target feature does not exist in FuncTree yet. It creates/updates the canonical map, canonical feature, and focus workflow in one idempotent call.',
+      'Use functree_upsert_feature_focus to start or continue a focused analysis task for one feature: record the concrete question, scope, seed paths, target maps, related features, next steps, findings, and confidence. Use functree_query_feature_focuses to resume existing focus work.',
+      'Use functree_upsert_feature_dossier when writing the result of a deep analysis for one feature. It can create/update the canonical feature, implementation slices, statuses, evidence, entry points, code references, gaps, and alignments in one idempotent call.',
+      'Use functree_get_feature_dossier first when preparing to analyze or modify one feature. It returns a feature-centered dossier with current focus records, canonical capability, implementation slices, status matrix, gaps, evidence, code references, entry points, alignments, and quality issues.',
+      'Use functree_get_feature_readiness after preparing or writing one feature to decide whether the feature is ready for implementation, still needs product intent, cross-layer coverage, code references, code_fact evidence, acceptance criteria, explicit gaps, or mock boundaries.',
+      'Maps are context views such as product.chat, web.chat-ui, backend.matrix-chat-core, sdk.public-user-sdk, or ops.deployment; they help classify a feature but should not replace the feature as the unit of work.',
       'Use map axis/scope/kind for primary classification. Tags are only secondary labels.',
       'Entry points tell future agents where project analysis should start. A project can have multiple entry points across frontend, backend, CLI, config, schema, deployment, and test surfaces.',
       'Code references connect features and maps to concrete files, symbols, routes, tables, migrations, configs, tests, or documents.',
@@ -286,13 +495,13 @@ const server = new McpServer(
       'Use evidence to separate running-code facts from documentation claims, inference, plans, mock-only behavior, and deprecated behavior. Never treat mock_only or planned evidence as real backend capability.',
       'Use capability status matrix records to say whether a canonical feature is prototype, mock, partial, live, configured, deployed, none, or not_needed in each product/web/backend/sdk/ops map.',
       'Use capability gap records for same-name-different-meaning, same-capability-multiple-implementations, mock-vs-live gaps, data model conflicts, permission conflicts, and recommended convergence actions.',
-      'Use functree_get_programming_context when preparing to change a feature; it returns prioritized entry points, key code references, alignments, impacted features, risks, acceptance criteria, evidence, and quality issues.',
+      'Use functree_get_programming_context when you need a narrower action plan for code changes; use functree_get_feature_dossier when you need the full feature truth record.',
       'Use functree_get_capability_matrix when the user asks whether a capability is real, mock, partial, backed by backend APIs, or has unresolved cross-layer gaps.',
-      'Use functree_quality_report after syncs to find missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress details, mock boundaries, and stale paths.',
+      'Use functree_quality_report after syncs or feature-focused work to find missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress details, mock boundaries, and stale paths. Scope it with focusId/focusStableKey, featureId/featureStableKey, or mapStableKey when you only changed one area.',
       'The MCP adapter is a stateless bridge. It forwards all calls to the configured FuncTree HTTP server and does not store business data.',
-      'Use functree_query_context before writing when IDs, stableKeys, existing maps, features, entry points, code references, or alignments are uncertain.',
-      'Use functree_resolve_stable_keys when you need a stableKey -> id mapping for many objects before creating alignments.',
-      'Use functree_project_summary after large syncs to confirm counts, latest scan, conflicts, evidence count, and orphan references.',
+      'Use functree_query_context before writing when IDs, stableKeys, existing maps, features, feature focuses, entry points, code references, evidence, or alignments are uncertain.',
+      'Use functree_resolve_stable_keys when you need a stableKey -> id mapping for many objects, including feature_focus stableKeys before resuming focused work or creating alignments.',
+      'Use functree_project_summary after large syncs or before resuming work to confirm counts, feature focus queue counts, latest focus, latest scan, conflicts, evidence count, and orphan references.',
       'Use functree_query_path_context before updating code references for a file path to avoid duplicate near-identical references.',
       'functree_query_context is read-only and supports keyword, types, view: "lite", includeSummaryOnly, includeMembers, stableKey, mapId/mapStableKey, alignmentId, parentFeatureId, entryPointId, codeReferenceId, path/pathMode, offset, and cursor filters.',
       'Write tools return operation, changedFields, data, dryRun, and sometimes previewId. dryRun-created IDs are prefixed with preview_ and must not be reused as real IDs.',
@@ -669,18 +878,100 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_upsert_feature_dossier',
+  {
+    title: 'Upsert feature-first dossier',
+    description:
+      'Create or update one feature-centered dossier in a single call: canonical product/capability feature, implementation slices across maps, statuses, inline evidence, entry points, code references, gaps/conflicts, and alignments. Use this when analyzing one feature deeply instead of building the whole project tree first.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      canonicalMap: z.object(dossierCanonicalMapShape).describe('Product/capability map that defines the canonical feature. Defaults axis/scope/kind to product/capability/domain.'),
+      canonicalFeature: z.object(dossierFeatureShape).describe('Canonical feature definition, including details for product intent and expected behavior.'),
+      canonicalEvidence: z.array(z.object(dossierEvidenceShape)).max(100).optional().describe('Evidence attached to the canonical feature, such as product docs or prototypes.'),
+      implementationSlices: z
+        .array(
+          z.object({
+            map: z.object(dossierSliceMapShape).describe('Implementation map, such as web/backend/sdk/ops.'),
+            feature: z.object(dossierFeatureShape).optional().describe('Concrete implementation feature in this map. Optional when the map has no implementation yet.'),
+            status: z.enum(capabilityStatuses).optional().describe('Implementation status for this map, such as prototype/mock/partial/live/none.'),
+            summary: z.string().optional().describe('Short implementation status summary.'),
+            gaps: z.array(z.string()).max(80).optional().describe('Known gaps for this implementation slice.'),
+            recommendedAction: z.string().optional().describe('Recommended next action for this slice.'),
+            evidence: z.array(z.object(dossierEvidenceShape)).max(100).optional().describe('Evidence attached to the implementation feature or status.'),
+            entryPoints: z.array(z.object(dossierEntryPointShape)).max(80).optional().describe('Entry points for this implementation slice.'),
+            codeReferences: z.array(z.object(dossierCodeReferenceShape)).max(300).optional().describe('Code references for this implementation slice.'),
+            align: z.boolean().optional().describe('When true, align the implementation feature with the canonical feature. Defaults to true.'),
+            alignmentRelation: z.enum(alignmentRelations).optional().describe('Alignment relation. Defaults to implements.'),
+            alignmentStableKey: z.string().optional().describe('Optional stable key for the generated alignment.')
+          })
+        )
+        .max(100)
+        .optional()
+        .describe('Implementation slices for product/web/backend/sdk/ops/etc.'),
+      gaps: z.array(z.object(dossierGapShape)).max(300).optional().describe('Structured capability gaps/conflicts for this canonical feature.'),
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_feature_dossier', args))
+);
+
+server.registerTool(
+  'functree_start_feature_focus',
+  {
+    title: 'Start feature focus',
+    description:
+      'Start feature-first work from a product doc, user request, or feature name when the feature does not exist yet. Creates/updates the canonical map, canonical feature, and focus workflow in one idempotent call.',
+    inputSchema: startFeatureFocusShape,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_start_feature_focus', args))
+);
+
+server.registerTool(
+  'functree_upsert_feature_focus',
+  {
+    title: 'Upsert feature focus',
+    description:
+      'Create or update a focused analysis task for one feature. Use this to begin with a single feature from product docs or user intent, record seed paths, target maps, related features, findings, and next steps, then expand into dossiers/maps over time.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      ...featureFocusShape,
+      dryRun: dryRunSchema
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_upsert_feature_focus', args))
+);
+
+server.registerTool(
   'functree_query_context',
   {
     title: 'Query FuncTree context',
     description:
-      'Read project, map, feature, entry point, code reference, and alignment context from FuncTree. Use before writing when IDs, stableKeys, or existing relationships are uncertain.',
+      'Read project, map, feature, feature focus, entry point, code reference, evidence, and alignment context from FuncTree. Use before writing when IDs, stableKeys, current focus work, or existing relationships are uncertain.',
     inputSchema: {
       projectId: z.string().optional().describe('Optional project ID. When omitted, can return project overview context.'),
       keyword: z
         .string()
         .optional()
         .describe('Optional keyword matched against names, descriptions, versions, stableKeys, IDs, paths, and symbols. Supports dot and hyphen fragments.'),
-      types: z.array(z.enum(queryContextTypes)).min(1).max(7).optional().describe('Object types to return, for example ["feature"], ["evidence"], or ["entry_point"].'),
+      types: z.array(z.enum(queryContextTypes)).min(1).max(8).optional().describe('Object types to return, for example ["feature"], ["feature_focus"], ["evidence"], or ["entry_point"].'),
       view: z.enum(queryContextViews).optional().describe('Use "lite" to return compact id/stableKey/name/type/mapId/path rows instead of full objects.'),
       includeSummaryOnly: z.boolean().optional().describe('When true, return only page totals and project summary without row arrays.'),
       includeMembers: z.boolean().optional().describe('When false, alignment rows omit members to reduce response size. Defaults to true.'),
@@ -716,11 +1007,75 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_search_features',
+  {
+    title: 'Search feature candidates',
+    description:
+      'Feature-first search. Use when the user gives a feature name, stableKey fragment, product requirement, or code path and you need to identify the most likely FuncTree feature before starting or continuing a focused analysis task.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      query: z.string().optional().describe('Feature name, stableKey fragment, user intent, or requirement text. Required unless path is provided.'),
+      path: z.string().optional().describe('Optional code path fragment to find features already linked to that file. Required unless query is provided.'),
+      pathMode: z.enum(pathMatchModes).optional().describe('Path match mode: contains, exact, or prefix. Defaults to contains.'),
+      mapId: z.string().optional().describe('Optional map ID to narrow candidates.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey to narrow candidates.'),
+      axes: z.array(z.enum(mapAxes)).min(1).max(10).optional().describe('Optional map axes to search, for example ["product"] or ["web", "backend"].'),
+      statuses: z.array(z.enum(featureStatuses)).min(1).max(9).optional().describe('Optional feature statuses to include.'),
+      includeArchived: z.boolean().optional().describe('When true, include archived/deprecated features and maps. Defaults to false.'),
+      includeDetails: z.boolean().optional().describe('When true, include structured feature details in candidates. Defaults to true.'),
+      limit: z.number().int().min(1).max(50).optional().describe('Maximum candidates to return. Defaults to 12.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_search_features', args))
+);
+
+server.registerTool(
+  'functree_prepare_feature_work',
+  {
+    title: 'Prepare feature work context',
+    description:
+      'Feature-first work package. Use when you are about to analyze or modify one feature from an existing focus, feature ID, stableKey, feature name, requirement fragment, or code path. Returns search readiness, selected focus/candidate, feature dossier, programming context, next steps, recommendedToolCalls, or a suggested start payload.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      focusId: z.string().optional().describe('Known feature focus ID. When provided, resumes that focus and prepares its feature directly.'),
+      focusStableKey: z.string().optional().describe('Known feature focus stableKey. Use to resume a focus workflow without searching.'),
+      featureId: z.string().optional().describe('Known feature ID. When provided, skips search and prepares that feature directly.'),
+      featureStableKey: z.string().optional().describe('Known feature stableKey. Use with mapStableKey/mapId when needed.'),
+      mapId: z.string().optional().describe('Optional map ID for featureStableKey disambiguation or search narrowing.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey for featureStableKey disambiguation or search narrowing.'),
+      featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
+      query: z.string().optional().describe('Feature name, stableKey fragment, user intent, or requirement text. Used when featureId/stableKey is not provided.'),
+      path: z.string().optional().describe('Optional code path fragment to locate a feature by linked code references.'),
+      pathMode: z.enum(pathMatchModes).optional().describe('Path match mode: contains, exact, or prefix. Defaults to contains.'),
+      axes: z.array(z.enum(mapAxes)).min(1).max(10).optional().describe('Optional map axes to search, for example ["product"] or ["web", "backend"].'),
+      statuses: z.array(z.enum(featureStatuses)).min(1).max(9).optional().describe('Optional feature statuses to include.'),
+      includeArchived: z.boolean().optional().describe('When true, include archived/deprecated features and maps. Defaults to false.'),
+      depth: z.number().int().min(0).max(3).optional().describe('Depth for returned dossier and programming context. Defaults to 2.'),
+      limit: z.number().int().min(1).max(20).optional().describe('Search candidate limit. Defaults to 8.'),
+      minCandidateScore: z.number().int().min(1).max(100).optional().describe('Minimum score required to auto-select a search candidate. Defaults to 50.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_prepare_feature_work', args))
+);
+
+server.registerTool(
   'functree_resolve_stable_keys',
   {
     title: 'Resolve FuncTree stable keys',
     description:
-      'Resolve many stableKey references to concrete FuncTree IDs. Use this before writing alignments or code references when you only know stable keys.',
+      'Resolve many stableKey references to concrete FuncTree IDs. Use this before resuming feature focuses or writing alignments/code references when you only know stable keys.',
     inputSchema: {
       projectId: z.string().describe('Project ID that owns all resolved objects.'),
       items: z.array(resolveStableKeyItemSchema).min(1).max(500).describe('Objects to resolve.')
@@ -740,7 +1095,7 @@ server.registerTool(
   {
     title: 'Get FuncTree project summary',
     description:
-      'Return lightweight project counts, latest scan run, stableKey conflicts, orphan code references, and path coverage. Use after large syncs.',
+      'Return lightweight project counts, feature focus/open focus counts, latest focus, latest scan run, stableKey conflicts, orphan code references, and path coverage. Use after large syncs or before resuming feature-first work.',
     inputSchema: {
       projectId: z.string().describe('Project ID to summarize.')
     },
@@ -783,20 +1138,110 @@ server.registerTool(
 );
 
 server.registerTool(
+  'functree_get_feature_dossier',
+  {
+    title: 'Get feature-first dossier',
+    description:
+      'Return a feature-centered dossier for one capability or implementation slice from a focus or feature reference: selectedFocus, canonical feature, product intent, implementation statuses, gaps/conflicts, evidence, code references, entry points, alignments, related features, and quality issues. Use this before analyzing or changing a specific feature.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      focusId: z.string().optional().describe('Optional feature focus ID. When provided, resolves the dossier feature from that focus.'),
+      focusStableKey: z.string().optional().describe('Optional feature focus stableKey. Use to read a dossier directly from a current focus workflow.'),
+      featureId: z.string().optional().describe('Concrete focus feature ID. Optional when focusId/focusStableKey/featureStableKey is provided.'),
+      featureStableKey: z.string().optional().describe('Focus feature stableKey. Use with mapStableKey/mapId when needed.'),
+      mapId: z.string().optional().describe('Optional map ID for featureStableKey disambiguation.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey for featureStableKey disambiguation.'),
+      featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
+      depth: z.number().int().min(0).max(3).optional().describe('How far to include related/impacted features. Defaults to 1.'),
+      include: z.array(z.enum(featureDossierIncludes)).min(1).max(10).optional().describe('Dossier sections to include. Defaults to all sections.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_get_feature_dossier', args))
+);
+
+server.registerTool(
+  'functree_get_feature_readiness',
+  {
+    title: 'Get feature readiness checklist',
+    description:
+      'Return a feature-first readiness checklist for one focus or feature: score, ready/needs_* status, required axes coverage, missing product intent/scope/behavior/code references/code_fact evidence/alignments/gaps/acceptance criteria/mock boundaries, next steps, and recommended tool calls. Use this after preparing or syncing a single feature.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      focusId: z.string().optional().describe('Optional feature focus ID. When provided, checks the focus feature.'),
+      focusStableKey: z.string().optional().describe('Optional feature focus stableKey. Use to check a current focus workflow.'),
+      featureId: z.string().optional().describe('Concrete feature ID. Optional when focusId/focusStableKey/featureStableKey is provided.'),
+      featureStableKey: z.string().optional().describe('Feature stableKey. Use with mapStableKey/mapId when needed.'),
+      mapId: z.string().optional().describe('Optional map ID for featureStableKey disambiguation.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey for featureStableKey disambiguation.'),
+      featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
+      requiredAxes: z.array(z.enum(mapAxes)).max(10).optional().describe('Optional axes that must be covered, such as product/web/backend/sdk/ops. Defaults to focus target maps, existing status axes, or product/web/backend.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_get_feature_readiness', args))
+);
+
+server.registerTool(
+  'functree_query_feature_focuses',
+  {
+    title: 'Query feature focuses',
+    description:
+      'List focused analysis tasks for a project or one feature. Use this to resume prior feature-first work before reading broad context or writing new dossier data.',
+    inputSchema: {
+      projectId: z.string().describe('Project ID.'),
+      focusId: z.string().optional().describe('Optional concrete feature focus ID filter.'),
+      focusStableKey: z.string().optional().describe('Optional feature focus stableKey filter.'),
+      keyword: z.string().optional().describe('Optional keyword matched against focus title, question, scope, findings, stableKey, and owning feature fields.'),
+      featureId: z.string().optional().describe('Optional feature ID filter.'),
+      featureStableKey: z.string().optional().describe('Optional feature stableKey filter. Use mapStableKey/mapId if ambiguous.'),
+      mapId: z.string().optional().describe('Optional owning feature map ID filter, also used for featureStableKey disambiguation.'),
+      mapStableKey: z.string().optional().describe('Optional owning feature map stableKey filter, also used for featureStableKey disambiguation.'),
+      featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
+      mode: z.enum(featureFocusModes).optional().describe('Optional focus mode filter, such as analyze, implement, or verify.'),
+      status: z.enum(featureFocusStatuses).optional().describe('Optional workflow status filter.'),
+      priority: z.enum(featureFocusPriorities).optional().describe('Optional priority filter.'),
+      sourceType: z.enum(featureFocusSourceTypes).optional().describe('Optional source type filter, such as product_doc, bug, or code_scan.'),
+      includeArchived: z.boolean().optional().describe('Include archived focus records. Defaults to false.'),
+      limit: z.number().int().min(1).max(200).optional().describe('Maximum focus records to return. Defaults to 50.')
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async (args) => textResult(await callHttpTool(config, 'functree_query_feature_focuses', args))
+);
+
+server.registerTool(
   'functree_get_programming_context',
   {
     title: 'Get programming context for a feature',
     description:
-      'Return action-oriented programming context for a feature: required entry points, key code references, related product capabilities, alignments, impacted features, evidence, risks, acceptance criteria, verification hints, and quality issues.',
+      'Return action-oriented programming context for one focus or feature: selectedFocus, active feature focuses, next actions, seedPathContexts, required entry points, key code references, related product capabilities, alignments, impacted features, evidence, risks, acceptance criteria, verification hints, gaps, and quality issues.',
     inputSchema: {
       projectId: z.string().describe('Project ID.'),
-      featureId: z.string().optional().describe('Concrete feature ID. Optional when featureStableKey is provided.'),
+      focusId: z.string().optional().describe('Optional feature focus ID. When provided, resolves the programming context feature from that focus.'),
+      focusStableKey: z.string().optional().describe('Optional feature focus stableKey. Use to read programming context directly from a current focus workflow.'),
+      featureId: z.string().optional().describe('Concrete feature ID. Optional when focusId/focusStableKey/featureStableKey is provided.'),
       featureStableKey: z.string().optional().describe('Feature stableKey to resolve. Use with mapStableKey/mapId when needed.'),
       mapId: z.string().optional().describe('Optional map ID for featureStableKey disambiguation.'),
       mapStableKey: z.string().optional().describe('Optional map stableKey for featureStableKey disambiguation.'),
       featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
       depth: z.number().int().min(0).max(3).optional().describe('How far to include parent/child/aligned features. Defaults to 1.'),
-      include: z.array(z.enum(programmingContextIncludes)).min(1).max(10).optional().describe('Context sections to include. Defaults to all sections.')
+      include: z.array(z.enum(programmingContextIncludes)).min(1).max(12).optional().describe('Context sections to include. Defaults to all sections.')
     },
     annotations: {
       readOnlyHint: true,
@@ -813,9 +1258,16 @@ server.registerTool(
   {
     title: 'Get FuncTree quality report',
     description:
-      'Return quality gaps for a project: missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress/blocked details, missing mock boundaries, and optionally missing file paths.',
+      'Return quality gaps for a project, map, feature, or feature focus: missing code references, missing alignments, missing code_fact evidence, thin draft/in_progress/blocked details, missing mock boundaries, and optionally missing file paths.',
     inputSchema: {
       projectId: z.string().describe('Project ID.'),
+      focusId: z.string().optional().describe('Optional feature focus ID to narrow the report to that focus feature.'),
+      focusStableKey: z.string().optional().describe('Optional feature focus stableKey to narrow the report to that focus feature.'),
+      featureId: z.string().optional().describe('Optional feature ID to narrow the report to one feature.'),
+      featureStableKey: z.string().optional().describe('Optional feature stableKey to narrow the report to one feature. Use mapStableKey/mapId if ambiguous.'),
+      mapId: z.string().optional().describe('Optional map ID to narrow the report to features in one map.'),
+      mapStableKey: z.string().optional().describe('Optional map stableKey to narrow the report to features in one map.'),
+      featureVersion: z.string().optional().describe('Optional feature version for featureStableKey disambiguation.'),
       repoRoot: z.string().optional().describe('Optional local repository root used for path existence checks.'),
       includePathChecks: z.boolean().optional().describe('When true and repoRoot is set, check whether code reference paths exist.')
     },

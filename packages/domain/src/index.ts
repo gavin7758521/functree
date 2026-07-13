@@ -101,12 +101,13 @@ export const CodeReferenceRoleInFeatureSchema = z.enum([
   'adapter',
   'other'
 ]);
-export const QueryContextTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference', 'evidence']);
+export const QueryContextTypeSchema = z.enum(['project', 'map', 'feature', 'feature_focus', 'alignment', 'entry_point', 'code_reference', 'evidence']);
 export const QueryContextViewSchema = z.enum(['full', 'lite']);
 export const PathMatchModeSchema = z.enum(['contains', 'exact', 'prefix']);
-export const ResolveStableKeyTypeSchema = z.enum(['project', 'map', 'feature', 'alignment', 'entry_point', 'code_reference']);
+export const ResolveStableKeyTypeSchema = z.enum(['project', 'map', 'feature', 'feature_focus', 'alignment', 'entry_point', 'code_reference']);
 export const ScanRunStatusSchema = z.enum(['running', 'completed', 'failed', 'cancelled']);
-export const ProgrammingContextIncludeSchema = z.enum(['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality', 'statusMatrix', 'gaps']);
+export const ProgrammingContextIncludeSchema = z.enum(['entryPoints', 'codeReferences', 'alignments', 'risks', 'acceptanceCriteria', 'evidence', 'details', 'quality', 'statusMatrix', 'gaps', 'focuses', 'seedPathContexts']);
+export const FeatureDossierIncludeSchema = z.enum(['details', 'codeReferences', 'entryPoints', 'alignments', 'evidence', 'statusMatrix', 'gaps', 'relatedFeatures', 'quality', 'focuses']);
 export const CapabilityImplementationStatusSchema = z.enum([
   'unknown',
   'none',
@@ -138,6 +139,10 @@ export const CapabilityGapTypeSchema = z.enum([
 ]);
 export const CapabilityGapSeveritySchema = z.enum(['high', 'medium', 'low']);
 export const CapabilityGapStatusSchema = z.enum(['open', 'accepted', 'resolved', 'ignored']);
+export const FeatureFocusModeSchema = z.enum(['discover', 'analyze', 'implement', 'verify', 'maintain']);
+export const FeatureFocusStatusSchema = z.enum(['open', 'in_progress', 'paused', 'ready_for_implementation', 'implemented', 'closed', 'archived']);
+export const FeatureFocusPrioritySchema = z.enum(['high', 'medium', 'low']);
+export const FeatureFocusSourceTypeSchema = z.enum(['user_request', 'product_doc', 'code_scan', 'bug', 'refactor', 'research', 'other']);
 
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export type MapAxis = z.infer<typeof MapAxisSchema>;
@@ -162,10 +167,15 @@ export type PathMatchMode = z.infer<typeof PathMatchModeSchema>;
 export type ResolveStableKeyType = z.infer<typeof ResolveStableKeyTypeSchema>;
 export type ScanRunStatus = z.infer<typeof ScanRunStatusSchema>;
 export type ProgrammingContextInclude = z.infer<typeof ProgrammingContextIncludeSchema>;
+export type FeatureDossierInclude = z.infer<typeof FeatureDossierIncludeSchema>;
 export type CapabilityImplementationStatus = z.infer<typeof CapabilityImplementationStatusSchema>;
 export type CapabilityGapType = z.infer<typeof CapabilityGapTypeSchema>;
 export type CapabilityGapSeverity = z.infer<typeof CapabilityGapSeveritySchema>;
 export type CapabilityGapStatus = z.infer<typeof CapabilityGapStatusSchema>;
+export type FeatureFocusMode = z.infer<typeof FeatureFocusModeSchema>;
+export type FeatureFocusStatus = z.infer<typeof FeatureFocusStatusSchema>;
+export type FeatureFocusPriority = z.infer<typeof FeatureFocusPrioritySchema>;
+export type FeatureFocusSourceType = z.infer<typeof FeatureFocusSourceTypeSchema>;
 
 const IdSchema = z
   .string()
@@ -181,6 +191,7 @@ const MetadataSchema = z.record(z.string(), z.unknown()).optional().default({});
 const TagsSchema = z.array(z.string().trim().min(1).max(60)).max(40).optional().default([]);
 const DetailListSchema = z.array(z.string().trim().min(1).max(800)).max(80).optional().default([]);
 const EvidenceIdsSchema = z.array(IdSchema).max(100).optional().default([]);
+const StringListSchema = z.array(z.string().trim().min(1).max(1000)).max(100).optional().default([]);
 const BooleanQuerySchema = z.preprocess((value) => {
   if (typeof value !== 'string') return value;
   const normalized = value.trim().toLowerCase();
@@ -188,6 +199,13 @@ const BooleanQuerySchema = z.preprocess((value) => {
   if (normalized === 'false') return false;
   return value;
 }, z.boolean());
+const QueryLimitSchema = (max: number, defaultValue: number) =>
+  z.preprocess((value) => {
+    if (value === undefined || value === null) return defaultValue;
+    if (typeof value !== 'string') return value;
+    const normalized = value.trim();
+    return normalized === '' ? defaultValue : Number(normalized);
+  }, z.number().int().min(1).max(max));
 export const QUERY_CONTEXT_MAX_LIMIT = 200;
 const StableKeySchema = z.string().trim().min(1).max(180);
 const PathSchema = z.string().trim().min(1).max(600);
@@ -437,7 +455,7 @@ export const CreateCapabilityGapSchema = CreateCapabilityGapBaseSchema.refine(Ca
 export const QueryContextSchema = z.object({
   projectId: IdSchema.optional(),
   keyword: z.string().trim().max(120).optional().default(''),
-  types: z.array(QueryContextTypeSchema).min(1).max(7).optional(),
+  types: z.array(QueryContextTypeSchema).min(1).max(8).optional(),
   view: QueryContextViewSchema.optional().default('full'),
   includeSummaryOnly: BooleanQuerySchema.optional().default(false),
   includeMembers: BooleanQuerySchema.optional().default(true),
@@ -455,6 +473,46 @@ export const QueryContextSchema = z.object({
   limit: z.number().int().min(1).max(QUERY_CONTEXT_MAX_LIMIT).optional().default(20),
   offset: z.number().int().min(0).max(100000).optional().default(0),
   cursor: z.string().trim().max(40).optional()
+});
+
+export const SearchFeaturesSchema = z.object({
+  projectId: IdSchema,
+  query: z.string().trim().max(180).optional().default(''),
+  path: z.string().trim().max(600).optional(),
+  pathMode: PathMatchModeSchema.optional().default('contains'),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  axes: z.array(MapAxisSchema).min(1).max(10).optional(),
+  statuses: z.array(FeatureStatusSchema).min(1).max(9).optional(),
+  includeArchived: BooleanQuerySchema.optional().default(false),
+  includeDetails: BooleanQuerySchema.optional().default(true),
+  limit: z.number().int().min(1).max(50).optional().default(12)
+}).refine((input) => Boolean(input.query || input.path), {
+  message: '功能搜索需要 query 或 path。',
+  path: ['query']
+});
+
+export const PrepareFeatureWorkSchema = z.object({
+  projectId: IdSchema,
+  focusId: IdSchema.optional(),
+  focusStableKey: StableKeySchema.optional(),
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
+  query: z.string().trim().max(180).optional().default(''),
+  path: z.string().trim().max(600).optional(),
+  pathMode: PathMatchModeSchema.optional().default('contains'),
+  axes: z.array(MapAxisSchema).min(1).max(10).optional(),
+  statuses: z.array(FeatureStatusSchema).min(1).max(9).optional(),
+  includeArchived: BooleanQuerySchema.optional().default(false),
+  depth: z.number().int().min(0).max(3).optional().default(2),
+  limit: z.number().int().min(1).max(20).optional().default(8),
+  minCandidateScore: z.number().int().min(1).max(100).optional().default(50)
+}).refine((input) => Boolean(input.focusId || input.focusStableKey || input.featureId || input.featureStableKey || input.query || input.path), {
+  message: '准备功能工作需要 focusId、focusStableKey、featureId、featureStableKey、query 或 path。',
+  path: ['focusId']
 });
 
 export const BatchMapSchema = z.object({
@@ -524,6 +582,216 @@ export const BatchCapabilityGapSchema = z.object({
   items: z.array(CreateCapabilityGapBaseSchema.omit({ projectId: true, dryRun: true })).min(1).max(500)
 });
 
+const FeatureReferenceSchema = z
+  .object({
+    featureId: IdSchema.optional(),
+    featureStableKey: StableKeySchema.optional(),
+    mapId: IdSchema.optional(),
+    mapStableKey: StableKeySchema.optional(),
+    version: z.string().trim().min(1).max(80).optional()
+  })
+  .refine((input) => Boolean(input.featureId || input.featureStableKey), {
+    message: '相关功能需要 featureId 或 featureStableKey。',
+    path: ['featureId']
+  });
+
+const MapReferenceSchema = z
+  .object({
+    mapId: IdSchema.optional(),
+    mapStableKey: StableKeySchema.optional()
+  })
+  .refine((input) => Boolean(input.mapId || input.mapStableKey), {
+    message: '目标地图需要 mapId 或 mapStableKey。',
+    path: ['mapId']
+  });
+
+export const CreateFeatureFocusSchema = z
+  .object({
+    id: IdSchema.optional(),
+    projectId: IdSchema.optional(),
+    stableKey: StableKeySchema.optional(),
+    featureId: IdSchema.optional(),
+    featureStableKey: StableKeySchema.optional(),
+    mapId: IdSchema.optional(),
+    mapStableKey: StableKeySchema.optional(),
+    featureVersion: z.string().trim().min(1).max(80).optional(),
+    title: TextSchema,
+    mode: FeatureFocusModeSchema.default('analyze'),
+    status: FeatureFocusStatusSchema.default('open'),
+    priority: FeatureFocusPrioritySchema.default('medium'),
+    sourceType: FeatureFocusSourceTypeSchema.default('user_request'),
+    question: OptionalTextSchema,
+    scope: OptionalTextSchema,
+    sourceRefs: StringListSchema,
+    seedPaths: z.array(PathSchema).max(100).optional().default([]),
+    targetMaps: z.array(MapReferenceSchema).max(50).optional().default([]),
+    relatedFeatures: z.array(FeatureReferenceSchema).max(100).optional().default([]),
+    nextSteps: DetailListSchema,
+    findings: z.string().trim().max(12000).optional().default(''),
+    confidence: z.number().min(0).max(1).optional().default(0.5),
+    metadata: MetadataSchema,
+    dryRun: DryRunSchema
+  })
+  .refine((input) => Boolean(input.featureId || input.featureStableKey), {
+    message: '功能焦点需要 featureId 或 featureStableKey。',
+    path: ['featureId']
+  });
+
+export const QueryFeatureFocusesSchema = z.object({
+  projectId: IdSchema,
+  focusId: IdSchema.optional(),
+  focusStableKey: StableKeySchema.optional(),
+  keyword: z.string().trim().max(120).optional().default(''),
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
+  mode: FeatureFocusModeSchema.optional(),
+  status: FeatureFocusStatusSchema.optional(),
+  priority: FeatureFocusPrioritySchema.optional(),
+  sourceType: FeatureFocusSourceTypeSchema.optional(),
+  includeArchived: BooleanQuerySchema.optional().default(false),
+  limit: QueryLimitSchema(200, 50)
+});
+
+const FeatureDossierMapBaseSchema = z.object({
+  id: IdSchema.optional(),
+  stableKey: StableKeySchema,
+  name: TextSchema,
+  version: VersionSchema,
+  status: MapStatusSchema.default('normal'),
+  description: OptionalTextSchema,
+  owner: OptionalShortTextSchema,
+  tags: TagsSchema,
+  metadata: MetadataSchema
+});
+
+const FeatureDossierCanonicalMapSchema = FeatureDossierMapBaseSchema.extend({
+  axis: MapAxisSchema.default('product'),
+  scope: MapScopeSchema.default('capability'),
+  kind: MapKindSchema.default('domain')
+});
+
+const FeatureDossierSliceMapSchema = FeatureDossierMapBaseSchema.extend({
+  axis: MapAxisSchema,
+  scope: MapScopeSchema.default('implementation'),
+  kind: MapKindSchema.default('module')
+});
+
+const FeatureDossierFeatureSchema = z.object({
+  id: IdSchema.optional(),
+  stableKey: StableKeySchema,
+  name: TextSchema,
+  version: VersionSchema,
+  status: FeatureStatusSchema.default('draft'),
+  kind: FeatureKindSchema.default('capability'),
+  description: OptionalTextSchema,
+  sortOrder: z.number().int().min(0).max(100000).optional().default(0),
+  tags: TagsSchema,
+  details: FeatureDetailSchema.optional(),
+  metadata: MetadataSchema
+});
+
+const StartFeatureFocusShape = z.object({
+  id: IdSchema.optional(),
+  stableKey: StableKeySchema.optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  mode: FeatureFocusModeSchema.default('analyze'),
+  status: FeatureFocusStatusSchema.default('open'),
+  priority: FeatureFocusPrioritySchema.default('medium'),
+  sourceType: FeatureFocusSourceTypeSchema.default('user_request'),
+  question: OptionalTextSchema,
+  scope: OptionalTextSchema,
+  sourceRefs: StringListSchema,
+  seedPaths: z.array(PathSchema).max(100).optional().default([]),
+  targetMaps: z.array(MapReferenceSchema).max(50).optional().default([]),
+  relatedFeatures: z.array(FeatureReferenceSchema).max(100).optional().default([]),
+  nextSteps: DetailListSchema,
+  findings: z.string().trim().max(12000).optional().default(''),
+  confidence: z.number().min(0).max(1).optional().default(0.5),
+  metadata: MetadataSchema
+});
+
+export const StartFeatureFocusSchema = z.object({
+  projectId: IdSchema,
+  canonicalMap: FeatureDossierCanonicalMapSchema,
+  canonicalFeature: FeatureDossierFeatureSchema,
+  focus: StartFeatureFocusShape.partial().optional().default({}),
+  dryRun: DryRunSchema
+});
+
+const FeatureDossierEvidenceSchema = CreateEvidenceBaseSchema.omit({
+  projectId: true,
+  targetType: true,
+  targetId: true,
+  targetStableKey: true,
+  mapId: true,
+  mapStableKey: true,
+  version: true,
+  dryRun: true
+}).extend({
+  target: z.enum(['canonical_feature', 'implementation_feature', 'status']).optional().default('implementation_feature')
+});
+
+const FeatureDossierEntryPointSchema = CreateEntryPointSchema.omit({
+  projectId: true,
+  mapId: true,
+  mapStableKey: true,
+  dryRun: true
+});
+
+const FeatureDossierCodeReferenceSchema = CreateCodeReferenceSchema.omit({
+  projectId: true,
+  mapId: true,
+  mapStableKey: true,
+  featureId: true,
+  featureStableKey: true,
+  featureVersion: true,
+  dryRun: true
+});
+
+const FeatureDossierGapSchema = CreateCapabilityGapBaseSchema.omit({
+  projectId: true,
+  canonicalFeatureId: true,
+  canonicalFeatureStableKey: true,
+  canonicalMapId: true,
+  canonicalMapStableKey: true,
+  canonicalFeatureVersion: true,
+  dryRun: true
+}).extend({
+  evidence: z.array(FeatureDossierEvidenceSchema.omit({ target: true })).max(100).optional().default([])
+});
+
+export const UpsertFeatureDossierSchema = z.object({
+  projectId: IdSchema,
+  canonicalMap: FeatureDossierCanonicalMapSchema,
+  canonicalFeature: FeatureDossierFeatureSchema,
+  canonicalEvidence: z.array(FeatureDossierEvidenceSchema).max(100).optional().default([]),
+  implementationSlices: z
+    .array(
+      z.object({
+        map: FeatureDossierSliceMapSchema,
+        feature: FeatureDossierFeatureSchema.optional(),
+        status: CapabilityImplementationStatusSchema.default('unknown'),
+        summary: OptionalTextSchema,
+        gaps: DetailListSchema,
+        recommendedAction: OptionalTextSchema,
+        evidence: z.array(FeatureDossierEvidenceSchema).max(100).optional().default([]),
+        entryPoints: z.array(FeatureDossierEntryPointSchema).max(80).optional().default([]),
+        codeReferences: z.array(FeatureDossierCodeReferenceSchema).max(300).optional().default([]),
+        align: z.boolean().optional().default(true),
+        alignmentRelation: AlignmentRelationSchema.optional().default('implements'),
+        alignmentStableKey: StableKeySchema.optional()
+      })
+    )
+    .max(100)
+    .optional()
+    .default([]),
+  gaps: z.array(FeatureDossierGapSchema).max(300).optional().default([]),
+  dryRun: DryRunSchema
+});
+
 export const ResolveStableKeyItemSchema = z.object({
   type: ResolveStableKeyTypeSchema,
   id: IdSchema.optional(),
@@ -563,13 +831,15 @@ export const CapabilityMatrixSchema = z.object({
 
 export const ProgrammingContextSchema = z.object({
   projectId: IdSchema,
+  focusId: IdSchema.optional(),
+  focusStableKey: StableKeySchema.optional(),
   featureId: IdSchema.optional(),
   featureStableKey: StableKeySchema.optional(),
   mapId: IdSchema.optional(),
   mapStableKey: StableKeySchema.optional(),
   featureVersion: z.string().trim().min(1).max(80).optional(),
   depth: z.number().int().min(0).max(3).optional().default(1),
-  include: z.array(ProgrammingContextIncludeSchema).min(1).max(10).optional().default([
+  include: z.array(ProgrammingContextIncludeSchema).min(1).max(12).optional().default([
     'entryPoints',
     'codeReferences',
     'alignments',
@@ -579,15 +849,66 @@ export const ProgrammingContextSchema = z.object({
     'details',
     'quality',
     'statusMatrix',
-    'gaps'
+    'gaps',
+    'focuses',
+    'seedPathContexts'
   ])
-}).refine((input) => Boolean(input.featureId || input.featureStableKey), {
-  message: 'programming context 需要 featureId 或 featureStableKey。',
-  path: ['featureId']
+}).refine((input) => Boolean(input.focusId || input.focusStableKey || input.featureId || input.featureStableKey), {
+  message: 'programming context 需要 focusId、focusStableKey、featureId 或 featureStableKey。',
+  path: ['focusId']
+});
+
+export const FeatureDossierSchema = z.object({
+  projectId: IdSchema,
+  focusId: IdSchema.optional(),
+  focusStableKey: StableKeySchema.optional(),
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
+  depth: z.number().int().min(0).max(3).optional().default(1),
+  include: z.array(FeatureDossierIncludeSchema).min(1).max(10).optional().default([
+    'focuses',
+    'details',
+    'codeReferences',
+    'entryPoints',
+    'alignments',
+    'evidence',
+    'statusMatrix',
+    'gaps',
+    'relatedFeatures',
+    'quality'
+  ])
+}).refine((input) => Boolean(input.focusId || input.focusStableKey || input.featureId || input.featureStableKey), {
+  message: 'feature dossier 需要 focusId、focusStableKey、featureId 或 featureStableKey。',
+  path: ['focusId']
+});
+
+export const FeatureReadinessSchema = z.object({
+  projectId: IdSchema,
+  focusId: IdSchema.optional(),
+  focusStableKey: StableKeySchema.optional(),
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
+  requiredAxes: z.array(MapAxisSchema).max(10).optional().default([])
+}).refine((input) => Boolean(input.focusId || input.focusStableKey || input.featureId || input.featureStableKey), {
+  message: 'feature readiness 需要 focusId、focusStableKey、featureId 或 featureStableKey。',
+  path: ['focusId']
 });
 
 export const QualityReportSchema = z.object({
   projectId: IdSchema,
+  focusId: IdSchema.optional(),
+  focusStableKey: StableKeySchema.optional(),
+  featureId: IdSchema.optional(),
+  featureStableKey: StableKeySchema.optional(),
+  mapId: IdSchema.optional(),
+  mapStableKey: StableKeySchema.optional(),
+  featureVersion: z.string().trim().min(1).max(80).optional(),
   repoRoot: z.string().trim().max(800).optional(),
   includePathChecks: BooleanQuerySchema.optional().default(false)
 });
@@ -629,6 +950,8 @@ export type CreateEvidenceInput = z.input<typeof CreateEvidenceSchema>;
 export type CreateCapabilityStatusInput = z.input<typeof CreateCapabilityStatusSchema>;
 export type CreateCapabilityGapInput = z.input<typeof CreateCapabilityGapSchema>;
 export type QueryContextInput = z.input<typeof QueryContextSchema>;
+export type SearchFeaturesInput = z.input<typeof SearchFeaturesSchema>;
+export type PrepareFeatureWorkInput = z.input<typeof PrepareFeatureWorkSchema>;
 export type BatchMapInput = z.input<typeof BatchMapSchema>;
 export type BatchFeatureInput = z.input<typeof BatchFeatureSchema>;
 export type BatchEntryPointInput = z.input<typeof BatchEntryPointSchema>;
@@ -637,10 +960,16 @@ export type BatchAlignmentInput = z.input<typeof BatchAlignmentSchema>;
 export type BatchEvidenceInput = z.input<typeof BatchEvidenceSchema>;
 export type BatchCapabilityStatusInput = z.input<typeof BatchCapabilityStatusSchema>;
 export type BatchCapabilityGapInput = z.input<typeof BatchCapabilityGapSchema>;
+export type CreateFeatureFocusInput = z.input<typeof CreateFeatureFocusSchema>;
+export type QueryFeatureFocusesInput = z.input<typeof QueryFeatureFocusesSchema>;
+export type StartFeatureFocusInput = z.input<typeof StartFeatureFocusSchema>;
+export type UpsertFeatureDossierInput = z.input<typeof UpsertFeatureDossierSchema>;
 export type ResolveStableKeysInput = z.input<typeof ResolveStableKeysSchema>;
 export type ProjectSummaryInput = z.input<typeof ProjectSummarySchema>;
 export type CapabilityMatrixInput = z.input<typeof CapabilityMatrixSchema>;
 export type ProgrammingContextInput = z.input<typeof ProgrammingContextSchema>;
+export type FeatureDossierInput = z.input<typeof FeatureDossierSchema>;
+export type FeatureReadinessInput = z.input<typeof FeatureReadinessSchema>;
 export type QualityReportInput = z.input<typeof QualityReportSchema>;
 export type QueryPathContextInput = z.input<typeof QueryPathContextSchema>;
 export type BeginScanInput = z.input<typeof BeginScanSchema>;
@@ -705,6 +1034,20 @@ export const labels = {
     blocked: '阻塞中',
     mock_only: '仅 Mock'
   } satisfies Record<FeatureStatus, string>,
+  featureKind: {
+    capability: '能力',
+    module: '模块',
+    page: '页面',
+    api: 'API',
+    component: '组件',
+    process: '流程',
+    rule: '规则',
+    test: '测试',
+    doc: '文档',
+    data: '数据',
+    operation: '运维操作',
+    other: '其他'
+  } satisfies Record<FeatureKind, string>,
   entryPointKind: {
     app_root: '应用入口',
     router: '路由入口',
@@ -832,7 +1175,37 @@ export const labels = {
     accepted: '已接受',
     resolved: '已解决',
     ignored: '已忽略'
-  } satisfies Record<CapabilityGapStatus, string>
+  } satisfies Record<CapabilityGapStatus, string>,
+  featureFocusMode: {
+    discover: '发现',
+    analyze: '分析',
+    implement: '实现',
+    verify: '验证',
+    maintain: '维护'
+  } satisfies Record<FeatureFocusMode, string>,
+  featureFocusStatus: {
+    open: '待处理',
+    in_progress: '分析中',
+    paused: '暂停',
+    ready_for_implementation: '可进入实现',
+    implemented: '已实现',
+    closed: '已关闭',
+    archived: '已归档'
+  } satisfies Record<FeatureFocusStatus, string>,
+  featureFocusPriority: {
+    high: '高',
+    medium: '中',
+    low: '低'
+  } satisfies Record<FeatureFocusPriority, string>,
+  featureFocusSourceType: {
+    user_request: '用户需求',
+    product_doc: '产品文档',
+    code_scan: '代码扫描',
+    bug: '缺陷',
+    refactor: '重构',
+    research: '调研',
+    other: '其他'
+  } satisfies Record<FeatureFocusSourceType, string>
 };
 
 export function newId(prefix: string): string {
