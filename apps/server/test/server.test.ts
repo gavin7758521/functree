@@ -178,13 +178,19 @@ describe('FuncTree 服务端', () => {
     expect(prepared.programmingContext?.feature.id).toBe(productFeature.id);
     expect(prepared.nextSteps).toEqual(expect.arrayContaining([expect.stringContaining('继续功能焦点'), expect.stringContaining('开放缺口')]));
     expect(prepared.recommendedToolCalls.map((call) => call.toolName)).toEqual(
-      expect.arrayContaining(['functree_get_feature_dossier', 'functree_get_programming_context', 'functree_upsert_feature_focus'])
+      expect.arrayContaining(['functree_get_feature_dossier', 'functree_get_feature_readiness', 'functree_get_programming_context', 'functree_upsert_feature_focus'])
+    );
+    expect(prepared.recommendedToolCalls.find((call) => call.toolName === 'functree_get_feature_readiness')?.arguments).toEqual(
+      expect.objectContaining({ projectId: project.id, featureId: productFeature.id, requiredAxes: ['product', 'web', 'backend'] })
     );
     expect(preparedFocus.selectedFocus?.id).toBe(focus.id);
     expect(preparedFocus.selectedCandidate?.feature.id).toBe(productFeature.id);
     expect(preparedFocus.dossier?.selectedFocus?.id).toBe(focus.id);
     expect(preparedFocus.programmingContext?.selectedFocus?.id).toBe(focus.id);
     expect(preparedFocus.nextSteps[0]).toContain('对齐 mock 页面和真实 Bot API');
+    expect(preparedFocus.recommendedToolCalls.find((call) => call.toolName === 'functree_get_feature_readiness')?.arguments).toEqual(
+      expect.objectContaining({ projectId: project.id, focusId: focus.id, requiredAxes: ['product', 'web', 'backend'] })
+    );
     expect(preparedFocus.recommendedToolCalls.find((call) => call.toolName === 'functree_upsert_feature_focus')?.arguments).toEqual(
       expect.objectContaining({ id: focus.id, featureId: productFeature.id })
     );
@@ -281,16 +287,20 @@ describe('FuncTree 服务端', () => {
     expect(prepareResponse.statusCode).toBe(200);
     expect(prepareResponse.json().readiness).toBe('ready');
     expect(prepareResponse.json().dossier.focus.feature.stableKey).toBe('message.send-text');
-    expect(prepareResponse.json().recommendedToolCalls.map((call: { toolName: string }) => call.toolName)).toEqual(expect.arrayContaining(['functree_get_feature_dossier']));
+    expect(prepareResponse.json().recommendedToolCalls.map((call: { toolName: string }) => call.toolName)).toEqual(
+      expect.arrayContaining(['functree_get_feature_dossier', 'functree_get_feature_readiness'])
+    );
     expect(prepareFocusResponse.statusCode).toBe(200);
     expect(prepareFocusResponse.json().selectedFocus.id).toBe(focusResponse.json().data.id);
     expect(prepareFocusResponse.json().nextSteps[0]).toContain('确认发送入口和后端 API');
+    expect(prepareFocusResponse.json().recommendedToolCalls.find((call: { toolName: string }) => call.toolName === 'functree_get_feature_readiness').arguments.focusId).toBe(focusResponse.json().data.id);
     expect(prepareFocusResponse.json().recommendedToolCalls.find((call: { toolName: string }) => call.toolName === 'functree_upsert_feature_focus').arguments.id).toBe(focusResponse.json().data.id);
     expect(focusListResponse.statusCode).toBe(200);
     expect(focusListResponse.json()[0].id).toBe(focusResponse.json().data.id);
     expect(prepareHttpResponse.statusCode).toBe(200);
     expect(prepareHttpResponse.json().programmingContext.feature.stableKey).toBe('message.send-text');
     expect(prepareHttpResponse.json().recommendedToolCalls[0].toolName).toBe('functree_get_feature_dossier');
+    expect(prepareHttpResponse.json().recommendedToolCalls[1].toolName).toBe('functree_get_feature_readiness');
   });
 
   it('上下文查询支持包含符号的稳定键', async () => {

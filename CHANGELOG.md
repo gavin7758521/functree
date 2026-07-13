@@ -1,5 +1,11 @@
 # 变更记录
 
+## 未发布
+
+- Web 管理台把“功能档案”升级为“功能工作台”，按工作路线、功能定义、实现层级、证据代码、交给 Codex 分阶段呈现，避免单页平铺。
+- `functree_prepare_feature_work` 的推荐调用补齐 `functree_get_feature_readiness`，准备上下文后能直接复核产品意图、跨端覆盖、代码引用、证据、验收和 mock 边界。
+- README 和产品说明改为“功能第一”叙述，明确项目和功能地图是功能的上下文维度。
+
 ## 0.4.0
 
 - `functree_query_context` 新增 `view: "lite"`、`includeSummaryOnly`、`includeMembers`、`includeMetadata`、`mapStableKey` 和 `pathMode`，降低大项目上下文体积。

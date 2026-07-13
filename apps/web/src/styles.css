@@ -263,6 +263,7 @@ textarea:focus {
 .featureSearchSuggestion:active,
 .ghostButton:active,
 .sideEditorToggle:active,
+.dossierStage:active,
 .creatorToggle:active {
   transform: scale(0.96);
 }
@@ -298,6 +299,7 @@ textarea:focus {
 .focusPrepareButton:focus-visible,
 .ghostButton:focus-visible,
 .sideEditorToggle:focus-visible,
+.dossierStage:focus-visible,
 .creatorToggle:focus-visible {
   outline: 0;
   box-shadow: var(--focus);
@@ -1895,6 +1897,427 @@ pre,
 
 .dossierSection {
   border-radius: var(--radius-xl);
+}
+
+.dossierStageTabs {
+  min-width: 0;
+  border-radius: var(--radius-xl);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: var(--shadow-panel);
+}
+
+.dossierStage {
+  min-width: 0;
+  min-height: 78px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  display: grid;
+  grid-template-columns: 24px 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 10px;
+  background: var(--surface-muted);
+  color: var(--text);
+  text-align: left;
+  box-shadow: var(--shadow-border);
+  transition-property: background-color, box-shadow, color, transform;
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.dossierStage:hover {
+  background: var(--blue-soft);
+  box-shadow: var(--shadow-border-hover);
+}
+
+.dossierStage.active {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+  box-shadow:
+    0 0 0 1px rgba(15, 118, 110, 0.2),
+    0 8px 20px -18px rgba(15, 118, 110, 0.46);
+}
+
+.stageNumber,
+.dossierStage em {
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow-border);
+}
+
+.dossierStage.active .stageNumber,
+.dossierStage.active em {
+  background: var(--teal);
+  color: white;
+}
+
+.dossierStage > span:not(.stageNumber) {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.dossierStage strong,
+.dossierStage small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dossierStage strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.dossierStage small {
+  color: currentColor;
+  font-size: 12px;
+  opacity: 0.74;
+  white-space: nowrap;
+}
+
+.expansionPathPanel {
+  overflow: hidden;
+}
+
+.expansionPath {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(190px, 0.68fr) 26px minmax(0, 1.35fr) 26px minmax(170px, 0.52fr);
+  align-items: stretch;
+  gap: 0;
+}
+
+.pathNode,
+.pathLayer,
+.axisColumn,
+.gapDeepItem,
+.codeEvidenceGrid > section {
+  min-width: 0;
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  box-shadow: var(--shadow-border);
+}
+
+.pathNode {
+  min-height: 116px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-content: center;
+  gap: 4px 9px;
+  padding: 14px;
+}
+
+.pathNode svg {
+  color: var(--teal);
+}
+
+.pathNode span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.pathNode strong,
+.pathNode small,
+.pathNode em,
+.pathLayer strong,
+.pathLayer small,
+.pathLayer em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pathNode small,
+.pathLayer small,
+.pathLayer em,
+.axisSlice small,
+.axisSlice em,
+.gapDeepItem small,
+.gapDeepItem p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.pathNode em {
+  grid-column: 2;
+  justify-self: start;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.pathBridge {
+  align-self: center;
+  height: 2px;
+  background: linear-gradient(90deg, var(--line-strong), rgba(208, 213, 221, 0.18));
+  position: relative;
+}
+
+.pathBridge::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid var(--line-strong);
+  border-right: 2px solid var(--line-strong);
+  position: absolute;
+  top: -3px;
+  right: 0;
+  transform: rotate(45deg);
+}
+
+.pathLayerGrid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.pathLayer {
+  min-height: 116px;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.pathLayer > span {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pathLayer.status-live > span,
+.pathLayer.status-deployed > span,
+.pathLayer.status-approved > span,
+.pathLayer.status-configured > span {
+  background: var(--teal-soft);
+  color: var(--teal-strong);
+}
+
+.pathLayer.status-mock > span,
+.pathLayer.status-partial > span,
+.pathLayer.status-prototype > span {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.pathLayer em {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-style: normal;
+}
+
+.layerDeepPanel,
+.codeEvidencePanel {
+  display: grid;
+  gap: 12px;
+}
+
+.layerAxisMatrix {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.axisColumn {
+  min-height: 180px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-muted);
+}
+
+.axisColumn.filled {
+  background: var(--surface);
+}
+
+.axisColumn header {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.axisColumn header strong {
+  font-size: 13px;
+}
+
+.axisColumn header span {
+  min-width: 24px;
+  min-height: 22px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--shadow-border);
+}
+
+.axisColumn > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.axisSlice {
+  min-width: 0;
+  min-height: 74px;
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  background: var(--surface-muted);
+  box-shadow: var(--shadow-border);
+}
+
+.axisSlice.status-live,
+.axisSlice.status-deployed,
+.axisSlice.status-approved,
+.axisSlice.status-configured {
+  background: var(--teal-soft);
+}
+
+.axisSlice.status-mock,
+.axisSlice.status-partial,
+.axisSlice.status-prototype {
+  background: var(--amber-soft);
+}
+
+.axisSlice strong,
+.axisSlice small,
+.axisSlice em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.axisSlice em {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-style: normal;
+}
+
+.axisEmpty {
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.gapDeepList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.gapDeepItem {
+  min-height: 104px;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 12px;
+  background: var(--surface);
+}
+
+.gapDeepItem header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.gapDeepItem header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.gapDeepItem header span {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.gapDeepItem.severity-high header span {
+  background: var(--rose-soft);
+  color: var(--rose);
+}
+
+.gapDeepItem.severity-medium header span {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.gapDeepItem p {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.codeEvidenceGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.82fr);
+  gap: 10px;
+}
+
+.codeEvidenceGrid > section {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 12px;
+}
+
+.codeEvidenceGrid > section > header {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+
+.codeEvidenceGrid > section > header strong {
+  color: var(--text);
+  font-size: 13px;
 }
 
 .actionPlanPanel {
@@ -3654,6 +4077,31 @@ pre {
   .focusChooserGrid {
     grid-template-columns: 1fr;
   }
+
+  .dossierStageTabs,
+  .layerAxisMatrix {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expansionPath,
+  .codeEvidenceGrid,
+  .gapDeepList {
+    grid-template-columns: 1fr;
+  }
+
+  .pathBridge {
+    width: 2px;
+    height: 16px;
+    justify-self: center;
+    background: linear-gradient(180deg, var(--line-strong), rgba(208, 213, 221, 0.18));
+  }
+
+  .pathBridge::after {
+    top: auto;
+    right: -3px;
+    bottom: 0;
+    transform: rotate(135deg);
+  }
 }
 
 @media (max-width: 760px) {
@@ -3748,6 +4196,11 @@ pre {
 
   .dossierSignals {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dossierStageTabs,
+  .layerAxisMatrix {
+    grid-template-columns: 1fr;
   }
 
   .readinessHeader,

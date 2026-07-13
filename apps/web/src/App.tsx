@@ -33,9 +33,11 @@ import type { Alignment, CapabilityGap, CapabilityStatus, Catalog, CodeReference
 type View = 'dossier' | 'overview' | 'maps' | 'features' | 'entryPoints' | 'references' | 'alignments' | 'mcp';
 
 type ViewMeta = { id: View; label: string; icon: LucideIcon; group: '功能优先' | '项目视角' | '代码视角' | '同步工具' };
+type DossierStage = 'workflow' | 'definition' | 'layers' | 'code' | 'handoff';
+type DossierStageItem = { id: DossierStage; label: string; icon: LucideIcon; count: string; summary: string };
 
 const views: ViewMeta[] = [
-  { id: 'dossier', label: '功能档案', icon: Target, group: '功能优先' },
+  { id: 'dossier', label: '功能工作台', icon: Target, group: '功能优先' },
   { id: 'features', label: '功能树', icon: Network, group: '功能优先' },
   { id: 'overview', label: '项目总览', icon: Layers3, group: '项目视角' },
   { id: 'maps', label: '功能地图', icon: MapIcon, group: '项目视角' },
@@ -454,7 +456,7 @@ function WorkspaceNav({
             active={view === 'dossier'}
             icon={Target}
             level="01"
-            title="功能档案"
+            title="功能工作台"
             primary={selectedFeature?.name ?? '暂无功能'}
             secondary={selectedFeature?.stableKey ?? ''}
             count={viewCount('dossier', tree, overview)}
@@ -714,6 +716,48 @@ function FeatureDossierView({
   const focus = dossier?.focus.feature ?? featureRows.find(({ feature }) => feature.id === selectedFeatureId)?.feature;
   const focusMap = dossier?.focus.map ?? featureRows.find(({ feature }) => feature.id === focus?.id)?.map;
   const details = focus?.details;
+  const [stage, setStage] = useState<DossierStage>('workflow');
+  const stageItems: DossierStageItem[] = [
+    {
+      id: 'workflow',
+      label: '工作路线',
+      icon: Compass,
+      count: String((dossier?.entryPoints.length ?? 0) + (dossier?.codeReferences.length ?? 0)),
+      summary: '入口、关键代码、下一步'
+    },
+    {
+      id: 'definition',
+      label: '功能定义',
+      icon: Target,
+      count: String(featureDetailFieldCount(details)),
+      summary: '意图、范围、验收、焦点'
+    },
+    {
+      id: 'layers',
+      label: '实现层级',
+      icon: Layers3,
+      count: String((dossier?.implementationSlices.length ?? 0) + (dossier?.gaps.length ?? 0)),
+      summary: '产品/前端/后端/SDK/运维'
+    },
+    {
+      id: 'code',
+      label: '证据代码',
+      icon: FileSearch,
+      count: String((dossier?.codeReferences.length ?? 0) + (dossier?.evidence.length ?? 0)),
+      summary: '引用、证据、事实来源'
+    },
+    {
+      id: 'handoff',
+      label: '交给 Codex',
+      icon: Copy,
+      count: String(programmingContext?.nextActions.length ?? 0),
+      summary: '窄上下文提示'
+    }
+  ];
+
+  useEffect(() => {
+    setStage('workflow');
+  }, [focus?.id]);
 
   return (
     <section className="content featureDossierContent">
@@ -749,7 +793,7 @@ function FeatureDossierView({
           <div>
             <div className="eyebrow">
               <Target size={14} />
-              <span>{loading ? '正在读取功能档案' : '功能档案'}</span>
+              <span>{loading ? '正在读取功能工作台' : '功能工作台'}</span>
             </div>
             <h2>{focus?.name ?? '请选择一个功能'}</h2>
             <p>{focus?.description || details?.intent || '从左侧选择一个功能，FuncTree 会围绕这个点展开产品、前端、后端、证据和缺口。'}</p>
@@ -775,53 +819,28 @@ function FeatureDossierView({
 
             <FeatureReadinessPanel readiness={featureReadiness} loading={featureReadinessLoading} labels={labels} />
 
-            <DossierActionPlan dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} />
+            <DossierStageTabs items={stageItems} stage={stage} onSelect={setStage} />
 
-            <FeatureFocusPanel tree={tree} dossier={dossier} labels={labels} onSelectFeature={onSelectFeature} onSaved={onSaved} />
+            {stage === 'workflow' ? (
+              <>
+                <FeatureExpansionPath dossier={dossier} labels={labels} />
+                <DossierActionPlan dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} />
+                <ProgrammingContextPanel context={programmingContext} dossier={dossier} loading={programmingContextLoading} labels={labels} onSelectCodeReference={onSelectCodeReference} />
+              </>
+            ) : null}
 
-            <ProgrammingContextPanel context={programmingContext} dossier={dossier} loading={programmingContextLoading} labels={labels} onSelectCodeReference={onSelectCodeReference} />
+            {stage === 'definition' ? (
+              <>
+                <DossierDefinitionPanel focus={focus} focusMap={focusMap} dossier={dossier} labels={labels} onSaved={onSaved} />
+                <FeatureFocusPanel tree={tree} dossier={dossier} labels={labels} onSelectFeature={onSelectFeature} onSaved={onSaved} />
+              </>
+            ) : null}
 
-            <FeatureHandoffPanel dossier={dossier} context={programmingContext} loading={programmingContextLoading} />
+            {stage === 'layers' ? <DossierLayerPanel dossier={dossier} labels={labels} /> : null}
 
-            <DossierDefinitionPanel focus={focus} focusMap={focusMap} dossier={dossier} labels={labels} onSaved={onSaved} />
+            {stage === 'code' ? <DossierCodeEvidencePanel dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} /> : null}
 
-            <section className="panel dossierSection">
-              <div className="sectionHeader">
-                <h2>该改哪里</h2>
-                <span>{dossier?.codeReferences.length ?? 0} 个引用</span>
-              </div>
-              <div className="referenceCards">
-                {(dossier?.codeReferences ?? []).map((reference) => (
-                  <button key={reference.id} type="button" className="referenceAction" onClick={() => onSelectCodeReference(reference.id)}>
-                    <Code2 size={16} />
-                    <span>
-                      <strong>{reference.symbol || reference.path}</strong>
-                      <small>{reference.path}{lineRange(reference) === '未设置' ? '' : `:${lineRange(reference)}`}</small>
-                    </span>
-                    <em>{codeReferenceRoleLabel(reference, labels)}</em>
-                  </button>
-                ))}
-                {(dossier?.codeReferences.length ?? 0) === 0 ? <EmptyState title="暂无代码引用" /> : null}
-              </div>
-            </section>
-
-            <section className="panel dossierSection">
-              <div className="sectionHeader">
-                <h2>证据</h2>
-                <span>{dossier?.evidence.length ?? 0} 条</span>
-              </div>
-              <div className="evidenceTimeline">
-                {(dossier?.evidence ?? []).map((item) => (
-                  <article key={item.id} className="evidenceTimelineItem">
-                    <strong>{labels?.evidenceSourceType[item.sourceType] ?? item.sourceType}</strong>
-                    <span>{labels?.evidenceType[item.evidenceType] ?? item.evidenceType}</span>
-                    <p>{item.summary || item.symbol || item.path || item.id}</p>
-                    <small>{evidenceMeta(item)}</small>
-                  </article>
-                ))}
-                {(dossier?.evidence.length ?? 0) === 0 ? <EmptyState title="暂无证据" /> : null}
-              </div>
-            </section>
+            {stage === 'handoff' ? <FeatureHandoffPanel dossier={dossier} context={programmingContext} loading={programmingContextLoading} /> : null}
           </>
         ) : (
           <EmptyState title="暂无功能" />
@@ -833,6 +852,187 @@ function FeatureDossierView({
         <GapPanel tree={tree} dossier={dossier} gaps={dossier?.gaps ?? []} labels={labels} onSaved={onSaved} />
         <RelatedPanel dossier={dossier} labels={labels} />
       </aside>
+    </section>
+  );
+}
+
+function DossierStageTabs({ items, stage, onSelect }: { items: DossierStageItem[]; stage: DossierStage; onSelect: (stage: DossierStage) => void }) {
+  return (
+    <nav className="dossierStageTabs" aria-label="功能档案阶段">
+      {items.map((item, index) => {
+        const Icon = item.icon;
+        return (
+          <button key={item.id} type="button" className={stage === item.id ? 'dossierStage active' : 'dossierStage'} onClick={() => onSelect(item.id)} aria-current={stage === item.id ? 'step' : undefined}>
+            <span className="stageNumber">{index + 1}</span>
+            <Icon size={16} />
+            <span>
+              <strong>{item.label}</strong>
+              <small>{item.summary}</small>
+            </span>
+            <em>{item.count}</em>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function FeatureExpansionPath({ dossier, labels }: { dossier: FeatureDossier | null; labels: Catalog['labels'] | undefined }) {
+  const canonical = dossier?.canonicalFeature;
+  const focus = dossier?.focus.feature;
+  const slices = dossier?.implementationSlices ?? [];
+  const codeCount = dossier?.codeReferences.length ?? 0;
+  const evidenceCount = dossier?.evidence.length ?? 0;
+
+  return (
+    <section className="panel dossierSection expansionPathPanel">
+      <div className="sectionHeader">
+        <h2>从点入面</h2>
+        <span>{slices.length} 个实现层</span>
+      </div>
+      <div className="expansionPath">
+        <article className="pathNode canonical">
+          <Target size={17} />
+          <span>
+            <strong>{canonical?.name ?? focus?.name ?? '当前功能'}</strong>
+            <small>{canonical?.stableKey ?? focus?.stableKey ?? 'feature'}</small>
+          </span>
+          <em>功能点</em>
+        </article>
+        <span className="pathBridge" aria-hidden="true" />
+        <div className="pathLayerGrid">
+          {slices.map((slice) => (
+            <article key={slice.id} className={`pathLayer status-${slice.status}`}>
+              <span>{labels?.mapAxis[slice.map?.axis ?? 'other'] ?? slice.map?.axis ?? 'other'}</span>
+              <strong>{slice.map?.name ?? slice.mapId}</strong>
+              <small>{labels?.capabilityImplementationStatus[slice.status] ?? slice.status}</small>
+              <em>{slice.summary || slice.feature?.name || slice.recommendedAction || '暂无说明'}</em>
+            </article>
+          ))}
+          {slices.length === 0 ? <EmptyState title="暂无实现层级" /> : null}
+        </div>
+        <span className="pathBridge" aria-hidden="true" />
+        <article className="pathNode evidence">
+          <FileSearch size={17} />
+          <span>
+            <strong>代码与证据</strong>
+            <small>{codeCount} 个引用 / {evidenceCount} 条证据</small>
+          </span>
+          <em>事实</em>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function DossierLayerPanel({ dossier, labels }: { dossier: FeatureDossier | null; labels: Catalog['labels'] | undefined }) {
+  const slices = dossier?.implementationSlices ?? [];
+  const gaps = dossier?.gaps ?? [];
+  const axes = ['product', 'web', 'backend', 'sdk', 'ops'] as const;
+
+  return (
+    <section className="panel dossierSection layerDeepPanel">
+      <div className="sectionHeader">
+        <h2>实现层级</h2>
+        <span>{slices.length} 层 / {gaps.filter((gap) => gap.status === 'open').length} 个开放缺口</span>
+      </div>
+      <div className="layerAxisMatrix">
+        {axes.map((axis) => {
+          const axisSlices = slices.filter((slice) => slice.map?.axis === axis);
+          return (
+            <section key={axis} className={axisSlices.length ? 'axisColumn filled' : 'axisColumn'}>
+              <header>
+                <strong>{labels?.mapAxis[axis] ?? axis}</strong>
+                <span>{axisSlices.length}</span>
+              </header>
+              <div>
+                {axisSlices.map((slice) => (
+                  <article key={slice.id} className={`axisSlice status-${slice.status}`}>
+                    <strong>{slice.map?.name ?? slice.mapId}</strong>
+                    <small>{labels?.capabilityImplementationStatus[slice.status] ?? slice.status}</small>
+                    <em>{slice.summary || slice.feature?.name || slice.recommendedAction || '暂无说明'}</em>
+                  </article>
+                ))}
+                {axisSlices.length === 0 ? <span className="axisEmpty">未覆盖</span> : null}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      <div className="gapDeepList">
+        {gaps.map((gap) => (
+          <article key={gap.id} className={`gapDeepItem severity-${gap.severity}`}>
+            <header>
+              <TriangleAlert size={15} />
+              <strong>{gap.title}</strong>
+              <span>{labels?.capabilityGapSeverity[gap.severity] ?? gap.severity}</span>
+            </header>
+            <p>{gap.description || gap.recommendedAction || '暂无说明'}</p>
+            <small>{labels?.capabilityGapType[gap.gapType] ?? gap.gapType} / {labels?.capabilityGapStatus[gap.status] ?? gap.status}</small>
+          </article>
+        ))}
+        {gaps.length === 0 ? <EmptyState title="暂无缺口或冲突" /> : null}
+      </div>
+    </section>
+  );
+}
+
+function DossierCodeEvidencePanel({
+  dossier,
+  labels,
+  onSelectCodeReference
+}: {
+  dossier: FeatureDossier | null;
+  labels: Catalog['labels'] | undefined;
+  onSelectCodeReference: (referenceId: string) => void;
+}) {
+  const references = dossier?.codeReferences ?? [];
+  const evidence = dossier?.evidence ?? [];
+
+  return (
+    <section className="panel dossierSection codeEvidencePanel">
+      <div className="sectionHeader">
+        <h2>证据与代码</h2>
+        <span>{references.length} 个引用 / {evidence.length} 条证据</span>
+      </div>
+      <div className="codeEvidenceGrid">
+        <section>
+          <header>
+            <Code2 size={16} />
+            <strong>该改哪里</strong>
+          </header>
+          <div className="referenceCards">
+            {references.map((reference) => (
+              <button key={reference.id} type="button" className="referenceAction" onClick={() => onSelectCodeReference(reference.id)}>
+                <Code2 size={16} />
+                <span>
+                  <strong>{reference.symbol || reference.path}</strong>
+                  <small>{reference.path}{lineRange(reference) === '未设置' ? '' : `:${lineRange(reference)}`}</small>
+                </span>
+                <em>{codeReferenceRoleLabel(reference, labels)}</em>
+              </button>
+            ))}
+            {references.length === 0 ? <EmptyState title="暂无代码引用" /> : null}
+          </div>
+        </section>
+        <section>
+          <header>
+            <FileSearch size={16} />
+            <strong>事实来源</strong>
+          </header>
+          <div className="evidenceTimeline">
+            {evidence.map((item) => (
+              <article key={item.id} className="evidenceTimelineItem">
+                <strong>{labels?.evidenceSourceType[item.sourceType] ?? item.sourceType}</strong>
+                <span>{labels?.evidenceType[item.evidenceType] ?? item.evidenceType}</span>
+                <p>{item.summary || item.symbol || item.path || item.id}</p>
+                <small>{evidenceMeta(item)}</small>
+              </article>
+            ))}
+            {evidence.length === 0 ? <EmptyState title="暂无证据" /> : null}
+          </div>
+        </section>
+      </div>
     </section>
   );
 }

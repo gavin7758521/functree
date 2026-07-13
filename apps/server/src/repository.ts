@@ -5460,7 +5460,7 @@ function preparedFeatureNextSteps(candidate: FeatureSearchCandidate, dossier: Fe
     programmingContext.requiredEntryPoints[0] ? `先读入口：${programmingContext.requiredEntryPoints[0].path}` : '',
     programmingContext.keyCodeReferences[0] ? `再读关键代码：${programmingContext.keyCodeReferences[0].path}${programmingContext.keyCodeReferences[0].symbol ? ` / ${programmingContext.keyCodeReferences[0].symbol}` : ''}` : '',
     dossier.summary.openGapCount > 0 ? `确认 ${dossier.summary.openGapCount} 个开放缺口，避免把 mock/规划当成真实能力。` : '',
-    '改动或分析完成后，用 functree_upsert_feature_dossier 写回证据、代码引用、状态矩阵和缺口。'
+    '改动或分析完成后，用 functree_upsert_feature_dossier 写回证据、代码引用、状态矩阵和缺口，再调用 functree_get_feature_readiness 复核。'
   ].filter(Boolean);
   return unique(steps).slice(0, 8);
 }
@@ -5481,18 +5481,25 @@ function preparedFeatureFallbackSteps(candidate: FeatureSearchCandidate | null, 
 
 function preparedFeatureToolCalls(projectId: string, candidate: FeatureSearchCandidate, selectedFocus: FeatureFocusRow | null, depth: number): PreparedToolCall[] {
   const feature = candidate.feature;
+  const focusReference = selectedFocus ? { focusId: selectedFocus.id } : { featureId: feature.id };
   const calls: PreparedToolCall[] = [
     {
       toolName: 'functree_get_feature_dossier',
       priority: 'high',
       reason: '读取完整功能事实档案，用于确认产品意图、实现切片、证据、缺口和对齐关系。',
-      arguments: { projectId, featureId: feature.id, depth }
+      arguments: { projectId, ...focusReference, depth }
+    },
+    {
+      toolName: 'functree_get_feature_readiness',
+      priority: 'high',
+      reason: '检查这个功能是否已经具备产品意图、跨端覆盖、代码引用、code_fact 证据、验收条件和 mock 边界。',
+      arguments: { projectId, ...focusReference, requiredAxes: ['product', 'web', 'backend'] }
     },
     {
       toolName: 'functree_get_programming_context',
       priority: 'high',
       reason: '读取面向改代码的窄上下文，包括入口、关键代码引用、风险、验收项和推荐行动。',
-      arguments: { projectId, featureId: feature.id, depth }
+      arguments: { projectId, ...focusReference, depth }
     }
   ];
   if (selectedFocus) {
