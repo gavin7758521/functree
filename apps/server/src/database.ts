@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 
 export type Db = DatabaseSync;
 
-export function openDatabase(dbPath = process.env.FUNCTREE_DB ?? 'data/functree.db'): Db {
+const defaultDatabasePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..', 'data/functree.db');
+
+export function openDatabase(dbPath = process.env.FUNCTREE_DB ?? defaultDatabasePath): Db {
   const resolved = path.resolve(dbPath);
   fs.mkdirSync(path.dirname(resolved), { recursive: true });
   const db = new DatabaseSync(resolved);
