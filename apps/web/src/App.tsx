@@ -720,28 +720,28 @@ function FeatureDossierView({
   const stageItems: DossierStageItem[] = [
     {
       id: 'workflow',
-      label: '工作路线',
+      label: '概览',
       icon: Compass,
       count: String((dossier?.entryPoints.length ?? 0) + (dossier?.codeReferences.length ?? 0)),
-      summary: '入口、关键代码、下一步'
+      summary: '状态、路线、下一步'
     },
     {
       id: 'definition',
-      label: '功能定义',
+      label: '定义',
       icon: Target,
       count: String(featureDetailFieldCount(details)),
       summary: '意图、范围、验收、焦点'
     },
     {
       id: 'layers',
-      label: '实现层级',
+      label: '实现',
       icon: Layers3,
       count: String((dossier?.implementationSlices.length ?? 0) + (dossier?.gaps.length ?? 0)),
       summary: '产品/前端/后端/SDK/运维'
     },
     {
       id: 'code',
-      label: '证据代码',
+      label: '代码',
       icon: FileSearch,
       count: String((dossier?.codeReferences.length ?? 0) + (dossier?.evidence.length ?? 0)),
       summary: '引用、证据、事实来源'
@@ -760,110 +760,129 @@ function FeatureDossierView({
   }, [focus?.id]);
 
   return (
-    <section className="content featureDossierContent">
-      <aside className="dossierFeatureRail">
-        <WorkbenchHeader
-          icon={Target}
-          title="重点功能"
-          count={`${featureRows.length} 个`}
-          action={
-            <label className="search compactSearch">
-              <Search size={16} />
-              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索功能" />
-            </label>
-          }
-        />
-        <FeatureStartPanel tree={tree} labels={labels} onStarted={onSelectFeature} onSaved={onSaved} />
-        <FeatureSearchPanel tree={tree} labels={labels} query={keyword} onSelectFeature={onSelectFeature} onSaved={onSaved} />
-        <div className="featurePickList">
-          {filteredRows.map(({ feature, map }) => (
-            <button key={feature.id} type="button" className={feature.id === focus?.id ? 'featurePick active' : 'featurePick'} onClick={() => onSelectFeature(feature.id)}>
-              <span className="mapAxisPill">{labels?.mapAxis[map.axis] ?? map.axis}</span>
-              <strong>{feature.name}</strong>
-              <small>{feature.stableKey}</small>
-              <em>{map.name}</em>
-            </button>
-          ))}
-          {filteredRows.length === 0 ? <EmptyState title="没有匹配功能" /> : null}
-        </div>
-      </aside>
-
-      <section className="dossierMain">
-        <div className="dossierHero">
-          <div>
-            <div className="eyebrow">
-              <Target size={14} />
-              <span>{loading ? '正在读取功能工作台' : '功能工作台'}</span>
-            </div>
-            <h2>{focus?.name ?? '请选择一个功能'}</h2>
-            <p>{focus?.description || details?.intent || '从左侧选择一个功能，FuncTree 会围绕这个点展开产品、前端、后端、证据和缺口。'}</p>
+    <section className="content featureWorkspacePage">
+      <section className="featurePageHero">
+        <div>
+          <div className="eyebrow">
+            <Target size={14} />
+            <span>功能优先</span>
           </div>
-          {focus && focusMap ? (
-            <button type="button" className="contextButton" onClick={() => onSelectMap(focusMap.id)}>
-              <MapIcon size={16} />
-              <span>{focusMap.name}</span>
-              <small>{focusMap.stableKey}</small>
-            </button>
-          ) : null}
+          <h2>功能</h2>
+          <p>先定位一个功能，再进入它的定义、实现、代码、证据和 Codex 上下文。</p>
         </div>
-
-        {focus ? (
-          <>
-            <div className="dossierSignals">
-              <Signal label="实现切片" value={dossier?.implementationSlices.length ?? 0} />
-              <Signal label="分析焦点" value={dossier?.summary.openFocusCount ?? dossier?.focuses.length ?? 0} />
-              <Signal label="开放缺口" value={dossier?.summary.openGapCount ?? 0} />
-              <Signal label="代码引用" value={dossier?.summary.codeReferenceCount ?? 0} />
-              <Signal label="证据" value={dossier?.evidence.length ?? 0} />
-            </div>
-
-            <FeatureReadinessPanel readiness={featureReadiness} loading={featureReadinessLoading} labels={labels} />
-
-            <DossierStageTabs items={stageItems} stage={stage} onSelect={setStage} />
-
-            {stage === 'workflow' ? (
-              <>
-                <FeatureExpansionPath dossier={dossier} labels={labels} />
-                <DossierActionPlan dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} />
-                <ProgrammingContextPanel context={programmingContext} dossier={dossier} loading={programmingContextLoading} labels={labels} onSelectCodeReference={onSelectCodeReference} />
-              </>
-            ) : null}
-
-            {stage === 'definition' ? (
-              <>
-                <DossierDefinitionPanel focus={focus} focusMap={focusMap} dossier={dossier} labels={labels} onSaved={onSaved} />
-                <FeatureFocusPanel tree={tree} dossier={dossier} labels={labels} onSelectFeature={onSelectFeature} onSaved={onSaved} />
-              </>
-            ) : null}
-
-            {stage === 'layers' ? <DossierLayerPanel dossier={dossier} labels={labels} /> : null}
-
-            {stage === 'code' ? <DossierCodeEvidencePanel dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} /> : null}
-
-            {stage === 'handoff' ? <FeatureHandoffPanel dossier={dossier} context={programmingContext} loading={programmingContextLoading} /> : null}
-          </>
-        ) : (
-          <EmptyState title="暂无功能" />
-        )}
+        <FeatureStartPanel tree={tree} labels={labels} onStarted={onSelectFeature} onSaved={onSaved} />
       </section>
 
-      <aside className="dossierSide">
-        <StatusMatrixPanel tree={tree} dossier={dossier} statuses={dossier?.implementationSlices ?? []} labels={labels} onSaved={onSaved} />
-        <GapPanel tree={tree} dossier={dossier} gaps={dossier?.gaps ?? []} labels={labels} onSaved={onSaved} />
-        <RelatedPanel dossier={dossier} labels={labels} />
-      </aside>
+      <div className="featureBrowserGrid">
+        <aside className="featureListPane">
+          <div className="featureListHeader">
+            <div>
+              <strong>功能索引</strong>
+              <span>{filteredRows.length} / {featureRows.length}</span>
+            </div>
+            <label className="search featureListSearch">
+              <Search size={16} />
+              <input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索功能、stableKey、地图" />
+            </label>
+          </div>
+          <FeatureSearchPanel tree={tree} labels={labels} query={keyword} onSelectFeature={onSelectFeature} onSaved={onSaved} />
+          <div className="featurePickList featureIndexList">
+            {filteredRows.map(({ feature, map }) => (
+              <button key={feature.id} type="button" className={feature.id === focus?.id ? 'featurePick active' : 'featurePick'} onClick={() => onSelectFeature(feature.id)}>
+                <span className="mapAxisPill">{labels?.mapAxis[map.axis] ?? map.axis}</span>
+                <strong>{feature.name}</strong>
+                <small>{feature.stableKey}</small>
+                <em>{map.name}</em>
+              </button>
+            ))}
+            {filteredRows.length === 0 ? <EmptyState title="没有匹配功能" /> : null}
+          </div>
+        </aside>
+
+        <section className="featureDetailPane">
+          {focus ? (
+            <>
+              <div className="featureDetailHeader">
+                <div>
+                  <div className="eyebrow">
+                    <Target size={14} />
+                    <span>{loading ? '正在读取功能详情' : '功能详情'}</span>
+                  </div>
+                  <h2>{focus.name}</h2>
+                  <p>{focus.description || details?.intent || '这个功能还缺少摘要，建议在“定义”页补齐意图、范围和验收条件。'}</p>
+                </div>
+                {focusMap ? (
+                  <button type="button" className="contextButton" onClick={() => onSelectMap(focusMap.id)}>
+                    <MapIcon size={16} />
+                    <span>{focusMap.name}</span>
+                    <small>{focusMap.stableKey}</small>
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="dossierSignals featureDetailMetrics">
+                <Signal label="实现" value={dossier?.implementationSlices.length ?? 0} />
+                <Signal label="焦点" value={dossier?.summary.openFocusCount ?? dossier?.focuses.length ?? 0} />
+                <Signal label="缺口" value={dossier?.summary.openGapCount ?? 0} />
+                <Signal label="引用" value={dossier?.summary.codeReferenceCount ?? 0} />
+                <Signal label="证据" value={dossier?.evidence.length ?? 0} />
+              </div>
+
+              <FeatureReadinessPanel readiness={featureReadiness} loading={featureReadinessLoading} labels={labels} />
+              <DossierStageTabs items={stageItems} stage={stage} onSelect={setStage} />
+
+              <div className="featureTabSurface">
+                {stage === 'workflow' ? (
+                  <>
+                    <FeatureExpansionPath dossier={dossier} labels={labels} />
+                    <DossierActionPlan dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} />
+                  </>
+                ) : null}
+
+                {stage === 'definition' ? (
+                  <>
+                    <DossierDefinitionPanel focus={focus} focusMap={focusMap} dossier={dossier} labels={labels} onSaved={onSaved} />
+                    <FeatureFocusPanel tree={tree} dossier={dossier} labels={labels} onSelectFeature={onSelectFeature} onSaved={onSaved} />
+                  </>
+                ) : null}
+
+                {stage === 'layers' ? (
+                  <>
+                    <DossierLayerPanel dossier={dossier} labels={labels} />
+                    <div className="featureMaintenanceGrid">
+                      <StatusMatrixPanel tree={tree} dossier={dossier} statuses={dossier?.implementationSlices ?? []} labels={labels} onSaved={onSaved} />
+                      <GapPanel tree={tree} dossier={dossier} gaps={dossier?.gaps ?? []} labels={labels} onSaved={onSaved} />
+                      <RelatedPanel dossier={dossier} labels={labels} />
+                    </div>
+                  </>
+                ) : null}
+
+                {stage === 'code' ? <DossierCodeEvidencePanel dossier={dossier} labels={labels} onSelectCodeReference={onSelectCodeReference} /> : null}
+
+                {stage === 'handoff' ? (
+                  <>
+                    <ProgrammingContextPanel context={programmingContext} dossier={dossier} loading={programmingContextLoading} labels={labels} onSelectCodeReference={onSelectCodeReference} />
+                    <FeatureHandoffPanel dossier={dossier} context={programmingContext} loading={programmingContextLoading} />
+                  </>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <EmptyState title="暂无功能" />
+          )}
+        </section>
+      </div>
     </section>
   );
 }
 
 function DossierStageTabs({ items, stage, onSelect }: { items: DossierStageItem[]; stage: DossierStage; onSelect: (stage: DossierStage) => void }) {
   return (
-    <nav className="dossierStageTabs" aria-label="功能档案阶段">
-      {items.map((item, index) => {
+    <nav className="dossierStageTabs" aria-label="功能详情标签">
+      {items.map((item) => {
         const Icon = item.icon;
         return (
-          <button key={item.id} type="button" className={stage === item.id ? 'dossierStage active' : 'dossierStage'} onClick={() => onSelect(item.id)} aria-current={stage === item.id ? 'step' : undefined}>
-            <span className="stageNumber">{index + 1}</span>
+          <button key={item.id} type="button" className={stage === item.id ? 'dossierStage active' : 'dossierStage'} onClick={() => onSelect(item.id)} aria-current={stage === item.id ? 'page' : undefined}>
             <Icon size={16} />
             <span>
               <strong>{item.label}</strong>
